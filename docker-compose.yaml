@@ -1,6 +1,6 @@
 services:
   teamgram:
-    build: .
+    image: ghcr.io/iyear/teamgram-server:latest
     restart: always
     ports:
       - "10443:10443"
