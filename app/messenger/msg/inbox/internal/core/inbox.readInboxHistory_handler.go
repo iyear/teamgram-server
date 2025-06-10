@@ -19,24 +19,23 @@
 package core
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/teamgram/marmota/pkg/stores/sqlx"
 	"github.com/teamgram/proto/mtproto"
 	"github.com/teamgram/teamgram-server/app/messenger/msg/inbox/inbox"
 	"github.com/teamgram/teamgram-server/app/messenger/sync/sync"
 	"github.com/teamgram/teamgram-server/app/service/biz/dialog/dialog"
+
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // InboxReadInboxHistory
 // inbox.readInboxHistory user_id:long auth_key_id:long peer_type:int peer_id:long unread_count:int read_inbox_max_id:int max_id:int = Void;
 func (c *InboxCore) InboxReadInboxHistory(in *inbox.TLInboxReadInboxHistory) (*mtproto.Void, error) {
 	var (
-		maxId        = in.MaxId
-		did          = mtproto.MakeDialogId(in.UserId, in.PeerType, in.PeerId)
-		peerDialogId = mtproto.MakePeerDialogId(in.PeerType, in.PeerId)
-		unreadCount  int32
+		maxId       = in.MaxId
+		did         = mtproto.MakeDialogId(in.UserId, in.PeerType, in.PeerId)
+		unreadCount int32
 	)
 
 	if maxId > in.ReadInboxMaxId {
@@ -51,21 +50,65 @@ func (c *InboxCore) InboxReadInboxHistory(in *inbox.TLInboxReadInboxHistory) (*m
 		}
 	}
 
-	c.svcCtx.Dao.CachedConn.Exec(
+	_, _ = c.svcCtx.Dao.DialogClient.DialogInsertOrUpdateDialog(
 		c.ctx,
-		func(ctx context.Context, conn *sqlx.DB) (int64, int64, error) {
-			_, err := c.svcCtx.Dao.DialogsDAO.UpdateReadInboxMaxId(
-				ctx,
-				unreadCount,
-				maxId,
-				in.UserId,
-				peerDialogId)
+		&dialog.TLDialogInsertOrUpdateDialog{
+			UserId:          in.UserId,
+			PeerType:        in.PeerType,
+			PeerId:          in.PeerId,
+			TopMessage:      nil,
+			ReadOutboxMaxId: nil,
+			ReadInboxMaxId:  &wrapperspb.Int32Value{Value: maxId},
+			UnreadCount:     &wrapperspb.Int32Value{Value: unreadCount},
+			UnreadMark:      false,
+			PinnedMsgId:     nil,
+			Date2:           nil,
+		})
 
-			return 0, 0, err
-		},
-		dialog.GetDialogCacheKey(in.UserId, peerDialogId))
+	isUseV3 := false
+	if in.GetLayer() != nil {
+		isUseV3 = true
+	}
+	if !isUseV3 && in.GetServerId() != nil {
+		isUseV3 = true
+	}
+	if !isUseV3 && in.GetSessionId() != nil {
+		isUseV3 = true
+	}
+	if !isUseV3 && in.GetClientReqMsgId() != nil {
+		isUseV3 = true
+	}
 
-	c.svcCtx.Dao.SyncClient.SyncUpdatesNotMe(
+	var (
+		pts      = in.Pts
+		ptsCount = in.PtsCount
+	)
+	if isUseV3 {
+		pts = c.svcCtx.Dao.IDGenClient2.NextPtsId(c.ctx, in.UserId)
+		ptsCount = 1
+
+		rpcResult := &mtproto.TLRpcResult{
+			ReqMsgId: in.GetClientReqMsgId().GetValue(),
+			Result: mtproto.MakeTLMessagesAffectedMessages(&mtproto.Messages_AffectedMessages{
+				Pts:      pts,
+				PtsCount: ptsCount,
+			}).To_Messages_AffectedMessages(),
+		}
+		// push
+		x := mtproto.NewEncodeBuf(512)
+		_ = rpcResult.Encode(x, in.GetLayer().GetValue())
+		_, _ = c.svcCtx.Dao.SyncClient.SyncPushRpcResult(c.ctx, &sync.TLSyncPushRpcResult{
+			UserId:         in.UserId,
+			AuthKeyId:      in.AuthKeyId,
+			PermAuthKeyId:  in.AuthKeyId,
+			ServerId:       in.GetServerId().GetValue(),
+			SessionId:      in.GetSessionId().GetValue(),
+			ClientReqMsgId: in.GetClientReqMsgId().GetValue(),
+			RpcResult:      x.GetBuf(),
+		})
+	}
+
+	_, _ = c.svcCtx.Dao.SyncClient.SyncUpdatesNotMe(
 		c.ctx,
 		&sync.TLSyncUpdatesNotMe{
 			UserId:        in.UserId,
@@ -73,8 +116,8 @@ func (c *InboxCore) InboxReadInboxHistory(in *inbox.TLInboxReadInboxHistory) (*m
 			Updates: mtproto.MakeUpdatesByUpdates(mtproto.MakeTLUpdateReadHistoryInbox(&mtproto.Update{
 				Peer_PEER: mtproto.MakePeer(in.PeerType, in.PeerId),
 				MaxId:     maxId,
-				Pts_INT32: in.Pts,
-				PtsCount:  in.PtsCount,
+				Pts_INT32: pts,
+				PtsCount:  ptsCount,
 			}).To_Update()),
 		})
 

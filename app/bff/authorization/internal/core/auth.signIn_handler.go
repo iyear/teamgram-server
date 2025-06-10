@@ -24,7 +24,7 @@ import (
 
 	"github.com/teamgram/proto/mtproto"
 	"github.com/teamgram/teamgram-server/app/bff/authorization/internal/logic"
-	"github.com/teamgram/teamgram-server/app/bff/authorization/internal/model"
+	"github.com/teamgram/teamgram-server/app/bff/authorization/model"
 	"github.com/teamgram/teamgram-server/app/messenger/sync/sync"
 	"github.com/teamgram/teamgram-server/app/service/authsession/authsession"
 	userpb "github.com/teamgram/teamgram-server/app/service/biz/user/user"
@@ -72,7 +72,7 @@ func (c *AuthorizationCore) AuthSignIn(in *mtproto.TLAuthSignIn) (*mtproto.Auth_
 
 	// 3. check number
 	// client phone number format: "+86 111 1111 1111"
-	phoneNumber, err := checkPhoneNumberInvalid(in.PhoneNumber)
+	_, phoneNumber, err := checkPhoneNumberInvalid(in.PhoneNumber)
 	if err != nil {
 		c.Logger.Errorf("check phone_number(%s) error - %v", in.PhoneNumber, err)
 		err = mtproto.ErrPhoneNumberInvalid
@@ -167,6 +167,7 @@ func (c *AuthorizationCore) AuthSignIn(in *mtproto.TLAuthSignIn) (*mtproto.Auth_
 	selfUser := user.ToSelfUser()
 
 	c.svcCtx.AuthLogic.DeletePhoneCode(c.ctx, c.MD.PermAuthKeyId, in.PhoneNumber, phoneCodeHash)
+
 	region, _ := c.svcCtx.Dao.GetCountryAndRegionByIp(c.MD.ClientAddr)
 
 	var (
@@ -198,7 +199,7 @@ func (c *AuthorizationCore) AuthSignIn(in *mtproto.TLAuthSignIn) (*mtproto.Auth_
 		signInN.Message_STRING, signInN.Entities = mtproto.MakeTextAndMessageEntities(builder)
 	}
 
-	c.svcCtx.Dao.SyncClient.SyncUpdatesNotMe(
+	_, _ = c.svcCtx.Dao.SyncClient.SyncUpdatesNotMe(
 		c.ctx,
 		&sync.TLSyncUpdatesNotMe{
 			UserId:        user.Id(),

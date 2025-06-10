@@ -41,8 +41,6 @@ var rpcContextRegisters = map[string]RPCContextTuple{
 	"TLDialogReorderPinnedDialogs":              RPCContextTuple{"/mtproto.RPCDialog/dialog_reorderPinnedDialogs", func() interface{} { return new(mtproto.Bool) }},
 	"TLDialogGetDialogById":                     RPCContextTuple{"/mtproto.RPCDialog/dialog_getDialogById", func() interface{} { return new(DialogExt) }},
 	"TLDialogGetTopMessage":                     RPCContextTuple{"/mtproto.RPCDialog/dialog_getTopMessage", func() interface{} { return new(mtproto.Int32) }},
-	"TLDialogUpdateReadInbox":                   RPCContextTuple{"/mtproto.RPCDialog/dialog_updateReadInbox", func() interface{} { return new(mtproto.Bool) }},
-	"TLDialogUpdateReadOutbox":                  RPCContextTuple{"/mtproto.RPCDialog/dialog_updateReadOutbox", func() interface{} { return new(mtproto.Bool) }},
 	"TLDialogInsertOrUpdateDialog":              RPCContextTuple{"/mtproto.RPCDialog/dialog_insertOrUpdateDialog", func() interface{} { return new(mtproto.Bool) }},
 	"TLDialogDeleteDialog":                      RPCContextTuple{"/mtproto.RPCDialog/dialog_deleteDialog", func() interface{} { return new(mtproto.Bool) }},
 	"TLDialogGetUserPinnedMessage":              RPCContextTuple{"/mtproto.RPCDialog/dialog_getUserPinnedMessage", func() interface{} { return new(mtproto.Int32) }},
@@ -65,6 +63,9 @@ var rpcContextRegisters = map[string]RPCContextTuple{
 	"TLDialogGetDialogFilterBySlug":             RPCContextTuple{"/mtproto.RPCDialog/dialog_getDialogFilterBySlug", func() interface{} { return new(DialogFilterExt) }},
 	"TLDialogCreateDialogFilter":                RPCContextTuple{"/mtproto.RPCDialog/dialog_createDialogFilter", func() interface{} { return new(DialogFilterExt) }},
 	"TLDialogUpdateUnreadCount":                 RPCContextTuple{"/mtproto.RPCDialog/dialog_updateUnreadCount", func() interface{} { return new(mtproto.Bool) }},
+	"TLDialogToggleDialogFilterTags":            RPCContextTuple{"/mtproto.RPCDialog/dialog_toggleDialogFilterTags", func() interface{} { return new(mtproto.Bool) }},
+	"TLDialogGetDialogFilterTags":               RPCContextTuple{"/mtproto.RPCDialog/dialog_getDialogFilterTags", func() interface{} { return new(mtproto.Bool) }},
+	"TLDialogSetChatWallpaper":                  RPCContextTuple{"/mtproto.RPCDialog/dialog_setChatWallpaper", func() interface{} { return new(mtproto.Bool) }},
 }
 
 func FindRPCContextTuple(t interface{}) *RPCContextTuple {

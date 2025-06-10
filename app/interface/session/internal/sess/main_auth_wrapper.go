@@ -40,8 +40,12 @@ type SessionList struct {
 }
 
 func newSessionList(kType int, cb *MainAuthWrapper) *SessionList {
+	authId := int64(0)
+	if kType == mtproto.AuthKeyTypePerm {
+		authId = cb.authKeyId
+	}
 	return &SessionList{
-		authId:        0,
+		authId:        authId,
 		authType:      kType,
 		state:         0,
 		cacheSalt:     nil,
@@ -193,7 +197,7 @@ func (m *MainAuthWrapper) setOnline(ctx context.Context) {
 			m.authKeyId)
 
 		// s.setOnlineTTL(s.AuthUserId, s.authKeyId, getServerID(), s.Layer, 60)
-		m.cb.Dao.StatusClient.StatusSetSessionOnline(
+		_, _ = m.cb.Dao.StatusClient.StatusSetSessionOnline(
 			ctx,
 			&status.TLStatusSetSessionOnline{
 				UserId: m.AuthUserId,
@@ -290,7 +294,7 @@ func (m *MainAuthWrapper) onUpdateLayer(ctx context.Context, layer int32) {
 		m.client.Layer = layer
 	}
 
-	m.cb.Dao.AuthsessionClient.AuthsessionSetLayer(ctx, &authsession.TLAuthsessionSetLayer{
+	_, _ = m.cb.Dao.AuthsessionClient.AuthsessionSetLayer(ctx, &authsession.TLAuthsessionSetLayer{
 		AuthKeyId: m.authKeyId,
 		Ip:        "",
 		Layer:     layer,
@@ -391,6 +395,15 @@ func (m *MainAuthWrapper) onUpdateInitConnection(ctx context.Context, clientIp s
 func (m *MainAuthWrapper) onBindPushSessionId(ctx context.Context, sList *SessionList, sessionId int64) {
 	if m.pushSessionId == 0 {
 		m.pushSessionId = sessionId
+
+		// setAndroidPushSessionId
+		_, _ = m.cb.Dao.AuthsessionClient.AuthsessionSetAndroidPushSessionId(
+			ctx,
+			&authsession.TLAuthsessionSetAndroidPushSessionId{
+				UserId:    m.AuthUserId,
+				AuthKeyId: m.authKeyId,
+				SessionId: sessionId,
+			})
 	}
 
 	sess := m.androidPushSession
@@ -398,12 +411,12 @@ func (m *MainAuthWrapper) onBindPushSessionId(ctx context.Context, sList *Sessio
 		sess, _ = sList.sessions[sessionId]
 	}
 	if sess == nil {
-		logx.WithContext(ctx).Errorf("onBindPushSessionId - unknown error(auth_key_id: %d, session_id: %d)", sList.authId, sessionId)
-		return
-	} else {
-		sess.isAndroidPush = true
-		m.androidPushSession = sess
+		sess = newSession(sessionId, sList)
 	}
+
+	sess.isAndroidPush = true
+	sess.canSync = true
+	m.androidPushSession = sess
 
 	m.setOnline(ctx)
 }
@@ -507,7 +520,7 @@ func (m *MainAuthWrapper) getSessionListById(authId int64) (sList *SessionList) 
 }
 
 func (m *MainAuthWrapper) String() string {
-	return fmt.Sprintf("{auth_key_id: %d, user_id: %d, layer: %d}", m.authKeyId, m.AuthUserId, m.Layer)
+	return fmt.Sprintf("{auth_key_id: %d, user_id: %d, layer: %d}", m.authKeyId, m.AuthUserId, m.Layer())
 }
 
 func (m *MainAuthWrapper) Start() {
@@ -595,7 +608,7 @@ func (m *MainAuthWrapper) runLoop() {
 		}
 	}
 
-	logx.Info("quit runLoop...")
+	logx.Infof("%s -> quit runLoop...", m)
 }
 
 func (m *MainAuthWrapper) rpcRunLoop() {
@@ -605,7 +618,7 @@ func (m *MainAuthWrapper) rpcRunLoop() {
 	for {
 		apiRequest := m.rpcQueue.Pop()
 		if apiRequest == nil {
-			logx.Info("quit rpcRunLoop...")
+			logx.Infof("%s -> quit rpcRunLoop...", m)
 			return
 		} else {
 			threading.RunSafe(func() {
@@ -624,6 +637,7 @@ func (m *MainAuthWrapper) rpcRunLoop() {
 							Client:        m.ClientName(),
 							Langpack:      m.LangPack(),
 							PermAuthKeyId: m.authKeyId,
+							LangCode:      m.LangCode(),
 						},
 						request)
 					m.rpcDataChan <- request
@@ -932,18 +946,27 @@ func (m *MainAuthWrapper) onSessionClosed(ctx context.Context, connMsg *connData
 }
 
 func (m *MainAuthWrapper) onSyncRpcResultData(ctx context.Context, syncMsg *syncRpcResultData) {
-	logx.WithContext(ctx).Infof("onSyncRpcResultData - receive data: {sess: %s}",
-		m)
+	logx.WithContext(ctx).Infof("onSyncRpcResultData - receive data: {sess: %s}, data: {auth_id: %d, session_id: %d, client_msg_id: %d}",
+		m,
+		syncMsg.authId,
+		syncMsg.sessionId,
+		syncMsg.clientMsgId)
 
-	sList := m.getSessionListById(syncMsg.authId)
-	if sList == nil {
-		logx.WithContext(ctx).Errorf("onSyncRpcResultData - not found sessionList by authId: %d", syncMsg.authId)
-		return
+	var (
+		sess *session
+	)
+	sess, _ = m.mainAuth.sessions[syncMsg.sessionId]
+	if sess == nil {
+		sess, _ = m.tempAuth.sessions[syncMsg.sessionId]
+	}
+	if sess == nil {
+		sess, _ = m.mediaTempAuth.sessions[syncMsg.sessionId]
 	}
 
-	sess, _ := sList.sessions[syncMsg.sessionId]
 	if sess != nil {
 		sess.onSyncRpcResultData(ctx, syncMsg.clientMsgId, syncMsg.data)
+	} else {
+		logx.WithContext(ctx).Errorf("onSyncRpcResultData - not found session by sessionId: %d", syncMsg.sessionId)
 	}
 }
 

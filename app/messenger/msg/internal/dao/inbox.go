@@ -195,14 +195,7 @@ func (d *Dao) sendMessageToInbox(ctx context.Context, fromId int64, peer *mtprot
 				Date2:            date,
 			}
 
-			//lastInsertId, rowsAffected, result.Err = d.DialogsDAO.InsertOrUpdateTx(tx, dialogDO)
-			//logx.WithContext(ctx).Infof("lastInsertId:%d, rowsAffected: %d, result: %v, do: %v", lastInsertId, rowsAffected, result, dialogDO)
 		case mtproto.PEER_CHAT:
-			//var (
-			//	lastInsertId int64
-			//	rowsAffected int64
-			//)
-
 			dialogDO = &dataobject.DialogsDO{
 				UserId:               inBox.UserId,
 				PeerType:             peer.PeerType,
@@ -230,11 +223,6 @@ func (d *Dao) sendMessageToInbox(ctx context.Context, fromId int64, peer *mtprot
 				dialogDO.UnreadMentionsCount = 1
 			}
 
-			//lastInsertId, rowsAffected, result.Err = d.DialogsDAO.InsertOrUpdateTx(tx, dialogDO)
-			//logx.WithContext(ctx).Infof("lastInsertId:%d, rowsAffected: %d, result: %v, do: %v", lastInsertId, rowsAffected, result, dialogDO)
-			//if result.Err != nil {
-			//	return
-			//}
 		default:
 			result.Err = fmt.Errorf("fatal error - invalid peer_type: %v", peer)
 		}
@@ -242,7 +230,7 @@ func (d *Dao) sendMessageToInbox(ctx context.Context, fromId int64, peer *mtprot
 		for _, entity := range message.GetEntities() {
 			if entity.GetPredicateName() == mtproto.Predicate_messageEntityHashtag {
 				if entity.GetUrl() != "" {
-					d.HashTagsDAO.InsertOrUpdateTx(tx, &dataobject.HashTagsDO{
+					_, _, _ = d.HashTagsDAO.InsertOrUpdateTx(tx, &dataobject.HashTagsDO{
 						UserId:           inBox.UserId,
 						PeerType:         peer.PeerType,
 						PeerId:           peer.PeerId,
@@ -260,7 +248,7 @@ func (d *Dao) sendMessageToInbox(ctx context.Context, fromId int64, peer *mtprot
 		return nil, tR.Err
 	}
 
-	d.CachedConn.Exec(
+	_, _, _ = d.CachedConn.Exec(
 		ctx,
 		func(ctx context.Context, conn *sqlx.DB) (int64, int64, error) {
 			lastInsertId, rowsAffected, err := d.DialogsDAO.InsertOrUpdate(ctx, dialogDO)
@@ -366,9 +354,12 @@ func (d *Dao) DeleteInboxMessages(ctx context.Context, deleteUserId int64, peer 
 			ChatId: peer.PeerId,
 		})
 
+		logx.WithContext(ctx).Debugf("pUserIdList: %s", pUserIdList)
+
 		for _, uId := range pUserIdList.GetDatas() {
 			tables.Insert(d.MessagesDAO.CalcTableName(uId))
 		}
+		logx.WithContext(ctx).Debugf("tables: %s", tables)
 
 		for tableName, _ := range tables {
 			d.MessagesDAO.SelectByMessageDataIdListWithCB(

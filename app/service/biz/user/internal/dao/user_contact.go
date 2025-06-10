@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	contactKeyPrefix = "user_contact.2"
+	contactKeyPrefix = "user_contact.2#"
 )
 
 var (
@@ -51,16 +51,16 @@ type ContactItem struct {
 }
 
 func genContactCacheKey(selfId, contactId int64) string {
-	return fmt.Sprintf("%s_%d_%d", contactKeyPrefix, selfId, contactId)
+	return fmt.Sprintf("%s%d_%d", contactKeyPrefix, selfId, contactId)
 }
 
 func isContactCacheKey(k string) bool {
-	return strings.HasPrefix(k, contactKeyPrefix+"_")
+	return strings.HasPrefix(k, contactKeyPrefix)
 }
 
 func parseContactCacheKey(k string) (int64, int64) {
-	if strings.HasPrefix(k, contactKeyPrefix+"_") {
-		v := strings.Split(k[len(contactKeyPrefix)+1:], "_")
+	if strings.HasPrefix(k, contactKeyPrefix) {
+		v := strings.Split(k[len(contactKeyPrefix):], "_")
 		if len(v) != 2 {
 			return 0, 0
 		}
@@ -186,7 +186,7 @@ func (d *Dao) ClearContactCaches(ctx context.Context, userId int64, contactId ..
 		keys = append(keys, genContactCacheKey(userId, id))
 		keys = append(keys, genContactCacheKey(id, userId))
 	}
-	d.CachedConn.DelCache(ctx, keys...)
+	_ = d.CachedConn.DelCache(ctx, keys...)
 }
 
 func (d *Dao) GetCloseFriendList(ctx context.Context, id int64) []*mtproto.ContactData {
@@ -277,7 +277,7 @@ func (d *Dao) getContactListByKeyList(ctx context.Context, cKeys ...string) []*m
 		return contactList
 	}
 
-	d.CachedConn.QueryRows(
+	_ = d.CachedConn.QueryRows(
 		ctx,
 		func(ctx context.Context, conn *sqlx.DB, keys ...string) (map[string]interface{}, error) {
 			noCaches := make(map[string]interface{}, len(keys))

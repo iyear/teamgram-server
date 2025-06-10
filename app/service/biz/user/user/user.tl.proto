@@ -2,7 +2,7 @@
  * WARNING! All changes made in this file will be lost!
  * Created from 'scheme.tl' by 'mtprotoc'
  *
- * Copyright (c) 2024-present,  Teamgram Authors.
+ * Copyright (c) 2025-present,  Teamgram Authors.
  *  All rights reserved.
  *
  * Author: Benqi (wubenqi@gmail.com)
@@ -26,6 +26,7 @@ enum TLConstructor {
     CRC32_usersIdFound = -2134594054;
     CRC32_peerPeerNotifySettings = 1894399913;
     CRC32_lastSeenData = -1280204321;
+    CRC32_botInfoData = 25386268;
     CRC32_user_getLastSeens = 2090958337;
     CRC32_user_updateLastSeen = -46114259;
     CRC32_user_getLastSeen = -1860581154;
@@ -50,7 +51,7 @@ enum TLConstructor {
     CRC32_user_deletePeerSettings = 1586043239;
     CRC32_user_changePhone = -8759461;
     CRC32_user_createNewUser = 2044729473;
-    CRC32_user_deleteUser = 2132777160;
+    CRC32_user_deleteUser = 1651358992;
     CRC32_user_blockPeer = -2130301264;
     CRC32_user_unBlockPeer = -555280883;
     CRC32_user_blockedByUser = -1147140722;
@@ -88,7 +89,7 @@ enum TLConstructor {
     CRC32_user_getUserDataListByIdList = -2121142279;
     CRC32_user_getUserDataByToken = 1057580446;
     CRC32_user_search = 1882568397;
-    CRC32_user_updateBotData = -1174586898;
+    CRC32_user_updateBotData = 1626561832;
     CRC32_user_getImmutableUserV2 = 806009420;
     CRC32_user_getMutableUsersV2 = -1795585240;
     CRC32_user_createNewTestUser = 1282329771;
@@ -100,6 +101,28 @@ enum TLConstructor {
     CRC32_user_setStoriesHidden = -138012584;
     CRC32_user_updatePersonalChannel = -940065072;
     CRC32_user_getUserIdByPhone = -72645694;
+    CRC32_user_setAuthorizationTTL = -702417936;
+    CRC32_user_getAuthorizationTTL = -563197636;
+    CRC32_user_updatePremium = -1173824359;
+    CRC32_user_getBotInfoV2 = -738419547;
+}
+
+
+// BotInfoData <--
+//  + TL_botInfoData
+//
+message BotInfoData {
+    string predicate_name = 1;
+    TLConstructor  constructor = 2;
+    mtproto.BotInfo bot_info = 3;
+    google.protobuf.StringValue main_app_url = 4;
+    bool bot_inline = 5;
+    string token = 6;
+    int64 bot_id = 7;
+}
+
+message TL_botInfoData {
+    BotInfoData data2 = 1;
 }
 
 
@@ -357,6 +380,7 @@ message TL_user_deleteUser {
     TLConstructor  constructor = 1;
     int64 user_id = 3;
     string reason = 4;
+    string phone = 5;
 }
 
 //--------------------------------------------------------------------------------------------
@@ -624,7 +648,8 @@ message TL_user_updateBotData {
     mtproto.Bool bot_nochats = 5;
     mtproto.Bool bot_inline_geo = 6;
     mtproto.Bool bot_attach_menu = 7;
-    mtproto.Bool bot_inline_placeholder = 8;
+    google.protobuf.StringValue bot_inline_placeholder = 8;
+    mtproto.Bool bot_has_main_app = 9;
 }
 
 //--------------------------------------------------------------------------------------------
@@ -708,6 +733,33 @@ message TL_user_updatePersonalChannel {
 message TL_user_getUserIdByPhone {
     TLConstructor  constructor = 1;
     string phone = 3;
+}
+
+//--------------------------------------------------------------------------------------------
+message TL_user_setAuthorizationTTL {
+    TLConstructor  constructor = 1;
+    int64 user_id = 3;
+    int32 ttl = 4;
+}
+
+//--------------------------------------------------------------------------------------------
+message TL_user_getAuthorizationTTL {
+    TLConstructor  constructor = 1;
+    int64 user_id = 3;
+}
+
+//--------------------------------------------------------------------------------------------
+message TL_user_updatePremium {
+    TLConstructor  constructor = 1;
+    int64 user_id = 3;
+    mtproto.Bool premium = 4;
+    google.protobuf.Int32Value months = 5;
+}
+
+//--------------------------------------------------------------------------------------------
+message TL_user_getBotInfoV2 {
+    TLConstructor  constructor = 1;
+    int64 bot_id = 3;
 }
 
 
@@ -823,5 +875,9 @@ service RPCUser {
  rpc user_setStoriesHidden(TL_user_setStoriesHidden) returns (mtproto.Bool) {}
  rpc user_updatePersonalChannel(TL_user_updatePersonalChannel) returns (mtproto.Bool) {}
  rpc user_getUserIdByPhone(TL_user_getUserIdByPhone) returns (mtproto.Int64) {}
+ rpc user_setAuthorizationTTL(TL_user_setAuthorizationTTL) returns (mtproto.Bool) {}
+ rpc user_getAuthorizationTTL(TL_user_getAuthorizationTTL) returns (mtproto.AccountDaysTTL) {}
+ rpc user_updatePremium(TL_user_updatePremium) returns (mtproto.Bool) {}
+ rpc user_getBotInfoV2(TL_user_getBotInfoV2) returns (BotInfoData) {}
 }
 

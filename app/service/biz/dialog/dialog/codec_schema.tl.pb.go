@@ -2,7 +2,7 @@
  * WARNING! All changes made in this file will be lost!
  * Created from 'scheme.tl' by 'mtprotoc'
  *
- * Copyright (c) 2024-present,  Teamgram Authors.
+ * Copyright (c) 2025-present,  Teamgram Authors.
  *  All rights reserved.
  *
  * Author: Benqi (wubenqi@gmail.com)
@@ -29,9 +29,9 @@ var _ fmt.Stringer
 
 var clazzIdRegisters2 = map[int32]func() mtproto.TLObject{
 	// Constructor
-	-1109809056: func() mtproto.TLObject { // 0xbdd9a860
+	1930144063: func() mtproto.TLObject { // 0x730ba93f
 		o := MakeTLDialogExt(nil)
-		o.Data2.Constructor = -1109809056
+		o.Data2.Constructor = 1930144063
 		return o
 	},
 	-1496016642: func() mtproto.TLObject { // 0xa6d498fe
@@ -136,19 +136,9 @@ var clazzIdRegisters2 = map[int32]func() mtproto.TLObject{
 			Constructor: -92425614,
 		}
 	},
-	489158840: func() mtproto.TLObject { // 0x1d27f8b8
-		return &TLDialogUpdateReadInbox{
-			Constructor: 489158840,
-		}
-	},
-	1483799934: func() mtproto.TLObject { // 0x5870fd7e
-		return &TLDialogUpdateReadOutbox{
-			Constructor: 1483799934,
-		}
-	},
-	382601889: func() mtproto.TLObject { // 0x16ce0aa1
+	1563133986: func() mtproto.TLObject { // 0x5d2b8822
 		return &TLDialogInsertOrUpdateDialog{
-			Constructor: 382601889,
+			Constructor: 1563133986,
 		}
 	},
 	28515811: func() mtproto.TLObject { // 0x1b31de3
@@ -256,6 +246,21 @@ var clazzIdRegisters2 = map[int32]func() mtproto.TLObject{
 			Constructor: 732705613,
 		}
 	},
+	-1597149815: func() mtproto.TLObject { // 0xa0cd6d89
+		return &TLDialogToggleDialogFilterTags{
+			Constructor: -1597149815,
+		}
+	},
+	-84870505: func() mtproto.TLObject { // 0xfaf0fa97
+		return &TLDialogGetDialogFilterTags{
+			Constructor: -84870505,
+		}
+	},
+	-1252926702: func() mtproto.TLObject { // 0xb551db12
+		return &TLDialogSetChatWallpaper{
+			Constructor: -1252926702,
+		}
+	},
 }
 
 func NewTLObjectByClassID(classId int32) mtproto.TLObject {
@@ -306,7 +311,7 @@ func (m *DialogExt) CalcByteSize(layer int32) int {
 func (m *DialogExt) Decode(dBuf *mtproto.DecodeBuf) error {
 	m.Constructor = TLConstructor(dBuf.Int())
 	switch uint32(m.Constructor) {
-	case 0xbdd9a860:
+	case 0x730ba93f:
 		m2 := MakeTLDialogExt(m)
 		m2.Decode(dBuf)
 
@@ -341,6 +346,7 @@ func (m *TLDialogExt) To_DialogExt() *DialogExt {
 	return m.Data2
 }
 
+// // flags
 func (m *TLDialogExt) SetOrder(v int64) { m.Data2.Order = v }
 func (m *TLDialogExt) GetOrder() int64  { return m.Data2.Order }
 
@@ -359,21 +365,42 @@ func (m *TLDialogExt) GetThemeEmoticon() string  { return m.Data2.ThemeEmoticon 
 func (m *TLDialogExt) SetTtlPeriod(v int32) { m.Data2.TtlPeriod = v }
 func (m *TLDialogExt) GetTtlPeriod() int32  { return m.Data2.TtlPeriod }
 
+func (m *TLDialogExt) SetWallpaperId(v int64) { m.Data2.WallpaperId = v }
+func (m *TLDialogExt) GetWallpaperId() int64  { return m.Data2.WallpaperId }
+
+func (m *TLDialogExt) SetWallpaperOverridden(v bool) { m.Data2.WallpaperOverridden = v }
+func (m *TLDialogExt) GetWallpaperOverridden() bool  { return m.Data2.WallpaperOverridden }
+
 func (m *TLDialogExt) GetPredicateName() string {
 	return Predicate_dialogExt
 }
 
 func (m *TLDialogExt) Encode(x *mtproto.EncodeBuf, layer int32) error {
 	var encodeF = map[uint32]func() error{
-		0xbdd9a860: func() error {
-			x.UInt(0xbdd9a860)
+		0x730ba93f: func() error {
+			x.UInt(0x730ba93f)
 
+			// set flags
+			var getFlags = func() uint32 {
+				var flags uint32 = 0
+
+				if m.GetWallpaperOverridden() == true {
+					flags |= 1 << 0
+				}
+
+				return flags
+			}
+
+			// set flags
+			var flags = getFlags()
+			x.UInt(flags)
 			x.Long(m.GetOrder())
 			m.GetDialog().Encode(x, layer)
 			x.Int(m.GetAvailableMinId())
 			x.Long(m.GetDate())
 			x.String(m.GetThemeEmoticon())
 			x.Int(m.GetTtlPeriod())
+			x.Long(m.GetWallpaperId())
 			return nil
 		},
 	}
@@ -396,17 +423,23 @@ func (m *TLDialogExt) CalcByteSize(layer int32) int {
 
 func (m *TLDialogExt) Decode(dBuf *mtproto.DecodeBuf) error {
 	var decodeF = map[uint32]func() error{
-		0xbdd9a860: func() error {
+		0x730ba93f: func() error {
+			var flags = dBuf.UInt()
+			_ = flags
 			m.SetOrder(dBuf.Long())
 
-			m1 := &mtproto.Dialog{}
-			m1.Decode(dBuf)
-			m.SetDialog(m1)
+			m2 := &mtproto.Dialog{}
+			m2.Decode(dBuf)
+			m.SetDialog(m2)
 
 			m.SetAvailableMinId(dBuf.Int())
 			m.SetDate(dBuf.Long())
 			m.SetThemeEmoticon(dBuf.String())
 			m.SetTtlPeriod(dBuf.Int())
+			m.SetWallpaperId(dBuf.Long())
+			if (flags & (1 << 0)) != 0 {
+				m.SetWallpaperOverridden(true)
+			}
 			return dBuf.GetError()
 		},
 	}
@@ -1761,101 +1794,13 @@ func (m *TLDialogGetTopMessage) Decode(dBuf *mtproto.DecodeBuf) error {
 	return dBuf.GetError()
 }
 
-// TLDialogUpdateReadInbox
-///////////////////////////////////////////////////////////////////////////////
-
-func (m *TLDialogUpdateReadInbox) Encode(x *mtproto.EncodeBuf, layer int32) error {
-	switch uint32(m.Constructor) {
-	case 0x1d27f8b8:
-		x.UInt(0x1d27f8b8)
-
-		// no flags
-
-		x.Long(m.GetUserId())
-		x.Int(m.GetPeerType())
-		x.Long(m.GetPeerId())
-		x.Int(m.GetReadInboxId())
-
-	default:
-		// log.Errorf("")
-	}
-
-	return nil
-}
-
-func (m *TLDialogUpdateReadInbox) CalcByteSize(layer int32) int {
-	return 0
-}
-
-func (m *TLDialogUpdateReadInbox) Decode(dBuf *mtproto.DecodeBuf) error {
-	switch uint32(m.Constructor) {
-	case 0x1d27f8b8:
-
-		// not has flags
-
-		m.UserId = dBuf.Long()
-		m.PeerType = dBuf.Int()
-		m.PeerId = dBuf.Long()
-		m.ReadInboxId = dBuf.Int()
-		return dBuf.GetError()
-
-	default:
-		// log.Errorf("")
-	}
-	return dBuf.GetError()
-}
-
-// TLDialogUpdateReadOutbox
-///////////////////////////////////////////////////////////////////////////////
-
-func (m *TLDialogUpdateReadOutbox) Encode(x *mtproto.EncodeBuf, layer int32) error {
-	switch uint32(m.Constructor) {
-	case 0x5870fd7e:
-		x.UInt(0x5870fd7e)
-
-		// no flags
-
-		x.Long(m.GetUserId())
-		x.Int(m.GetPeerType())
-		x.Long(m.GetPeerId())
-		x.Int(m.GetReadOutboxId())
-
-	default:
-		// log.Errorf("")
-	}
-
-	return nil
-}
-
-func (m *TLDialogUpdateReadOutbox) CalcByteSize(layer int32) int {
-	return 0
-}
-
-func (m *TLDialogUpdateReadOutbox) Decode(dBuf *mtproto.DecodeBuf) error {
-	switch uint32(m.Constructor) {
-	case 0x5870fd7e:
-
-		// not has flags
-
-		m.UserId = dBuf.Long()
-		m.PeerType = dBuf.Int()
-		m.PeerId = dBuf.Long()
-		m.ReadOutboxId = dBuf.Int()
-		return dBuf.GetError()
-
-	default:
-		// log.Errorf("")
-	}
-	return dBuf.GetError()
-}
-
 // TLDialogInsertOrUpdateDialog
 ///////////////////////////////////////////////////////////////////////////////
 
 func (m *TLDialogInsertOrUpdateDialog) Encode(x *mtproto.EncodeBuf, layer int32) error {
 	switch uint32(m.Constructor) {
-	case 0x16ce0aa1:
-		x.UInt(0x16ce0aa1)
+	case 0x5d2b8822:
+		x.UInt(0x5d2b8822)
 
 		// set flags
 		var flags uint32 = 0
@@ -1877,6 +1822,9 @@ func (m *TLDialogInsertOrUpdateDialog) Encode(x *mtproto.EncodeBuf, layer int32)
 		}
 		if m.GetDate2() != nil {
 			flags |= 1 << 5
+		}
+		if m.GetPinnedMsgId() != nil {
+			flags |= 1 << 6
 		}
 
 		x.UInt(flags)
@@ -1905,6 +1853,10 @@ func (m *TLDialogInsertOrUpdateDialog) Encode(x *mtproto.EncodeBuf, layer int32)
 			x.Long(m.GetDate2().Value)
 		}
 
+		if m.GetPinnedMsgId() != nil {
+			x.Int(m.GetPinnedMsgId().Value)
+		}
+
 	default:
 		// log.Errorf("")
 	}
@@ -1918,7 +1870,7 @@ func (m *TLDialogInsertOrUpdateDialog) CalcByteSize(layer int32) int {
 
 func (m *TLDialogInsertOrUpdateDialog) Decode(dBuf *mtproto.DecodeBuf) error {
 	switch uint32(m.Constructor) {
-	case 0x16ce0aa1:
+	case 0x5d2b8822:
 
 		flags := dBuf.UInt()
 		_ = flags
@@ -1948,6 +1900,10 @@ func (m *TLDialogInsertOrUpdateDialog) Decode(dBuf *mtproto.DecodeBuf) error {
 		}
 		if (flags & (1 << 5)) != 0 {
 			m.Date2 = &wrapperspb.Int64Value{Value: dBuf.Long()}
+		}
+
+		if (flags & (1 << 6)) != 0 {
+			m.PinnedMsgId = &wrapperspb.Int32Value{Value: dBuf.Int()}
 		}
 
 		return dBuf.GetError()
@@ -2935,6 +2891,145 @@ func (m *TLDialogUpdateUnreadCount) Decode(dBuf *mtproto.DecodeBuf) error {
 			m.UnreadReactionsCount = &wrapperspb.Int32Value{Value: dBuf.Int()}
 		}
 
+		return dBuf.GetError()
+
+	default:
+		// log.Errorf("")
+	}
+	return dBuf.GetError()
+}
+
+// TLDialogToggleDialogFilterTags
+///////////////////////////////////////////////////////////////////////////////
+
+func (m *TLDialogToggleDialogFilterTags) Encode(x *mtproto.EncodeBuf, layer int32) error {
+	switch uint32(m.Constructor) {
+	case 0xa0cd6d89:
+		x.UInt(0xa0cd6d89)
+
+		// no flags
+
+		x.Long(m.GetUserId())
+		m.GetEnabled().Encode(x, layer)
+
+	default:
+		// log.Errorf("")
+	}
+
+	return nil
+}
+
+func (m *TLDialogToggleDialogFilterTags) CalcByteSize(layer int32) int {
+	return 0
+}
+
+func (m *TLDialogToggleDialogFilterTags) Decode(dBuf *mtproto.DecodeBuf) error {
+	switch uint32(m.Constructor) {
+	case 0xa0cd6d89:
+
+		// not has flags
+
+		m.UserId = dBuf.Long()
+
+		m2 := &mtproto.Bool{}
+		m2.Decode(dBuf)
+		m.Enabled = m2
+
+		return dBuf.GetError()
+
+	default:
+		// log.Errorf("")
+	}
+	return dBuf.GetError()
+}
+
+// TLDialogGetDialogFilterTags
+///////////////////////////////////////////////////////////////////////////////
+
+func (m *TLDialogGetDialogFilterTags) Encode(x *mtproto.EncodeBuf, layer int32) error {
+	switch uint32(m.Constructor) {
+	case 0xfaf0fa97:
+		x.UInt(0xfaf0fa97)
+
+		// no flags
+
+		x.Long(m.GetUserId())
+
+	default:
+		// log.Errorf("")
+	}
+
+	return nil
+}
+
+func (m *TLDialogGetDialogFilterTags) CalcByteSize(layer int32) int {
+	return 0
+}
+
+func (m *TLDialogGetDialogFilterTags) Decode(dBuf *mtproto.DecodeBuf) error {
+	switch uint32(m.Constructor) {
+	case 0xfaf0fa97:
+
+		// not has flags
+
+		m.UserId = dBuf.Long()
+		return dBuf.GetError()
+
+	default:
+		// log.Errorf("")
+	}
+	return dBuf.GetError()
+}
+
+// TLDialogSetChatWallpaper
+///////////////////////////////////////////////////////////////////////////////
+
+func (m *TLDialogSetChatWallpaper) Encode(x *mtproto.EncodeBuf, layer int32) error {
+	switch uint32(m.Constructor) {
+	case 0xb551db12:
+		x.UInt(0xb551db12)
+
+		// set flags
+		var flags uint32 = 0
+
+		if m.GetWallpaperOverridden() == true {
+			flags |= 1 << 0
+		}
+
+		x.UInt(flags)
+
+		// flags Debug by @benqi
+		x.Long(m.GetUserId())
+		x.Int(m.GetPeerType())
+		x.Long(m.GetPeerId())
+		x.Long(m.GetWallpaperId())
+
+	default:
+		// log.Errorf("")
+	}
+
+	return nil
+}
+
+func (m *TLDialogSetChatWallpaper) CalcByteSize(layer int32) int {
+	return 0
+}
+
+func (m *TLDialogSetChatWallpaper) Decode(dBuf *mtproto.DecodeBuf) error {
+	switch uint32(m.Constructor) {
+	case 0xb551db12:
+
+		flags := dBuf.UInt()
+		_ = flags
+
+		// flags Debug by @benqi
+		m.UserId = dBuf.Long()
+		m.PeerType = dBuf.Int()
+		m.PeerId = dBuf.Long()
+		m.WallpaperId = dBuf.Long()
+		if (flags & (1 << 0)) != 0 {
+			m.WallpaperOverridden = true
+		}
 		return dBuf.GetError()
 
 	default:

@@ -33,11 +33,13 @@ import (
 	"github.com/teamgram/marmota/pkg/hex2"
 	"github.com/teamgram/proto/mtproto"
 	"github.com/teamgram/proto/mtproto/crypto"
+	"github.com/teamgram/teamgram-server/app/interface/gnetway/internal/config"
 	sessionclient "github.com/teamgram/teamgram-server/app/interface/session/client"
 	"github.com/teamgram/teamgram-server/app/interface/session/session"
 
 	"github.com/panjf2000/gnet/v2"
 	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/timex"
 )
 
 const (
@@ -130,29 +132,65 @@ func init() {
 	gBigIntDH2048G = new(big.Int).SetBytes(dh2048G)
 }
 
-type handshake struct {
+type rsaKeyHelper struct {
 	rsa            *crypto.RSACryptor
-	keyFingerprint uint64
-	dh2048p        []byte
-	dh2048g        []byte
+	keyFingerprint int64
 }
 
-func newHandshake(keyFile string, keyFingerprint uint64) (*handshake, error) {
-	rsa, err := crypto.NewRSACryptor(keyFile)
-	if err != nil {
-		return nil, err
+type handshake struct {
+	keyFingerprints []int64
+	rsaList         []rsaKeyHelper
+	// keyFingerprint  uint64
+	dh2048p []byte
+	dh2048g []byte
+}
+
+func (m *handshake) getKey(keyFingerprint int64) *crypto.RSACryptor {
+	for _, v := range m.rsaList {
+		if v.keyFingerprint == keyFingerprint {
+			return v.rsa
+		}
 	}
-	return &handshake{
-		rsa:            rsa,
-		keyFingerprint: keyFingerprint,
-		dh2048p:        dh2048P,
-		dh2048g:        dh2048G,
-	}, nil
+
+	return nil
+}
+
+func mustNewHandshake(cList []config.RSAKey) *handshake {
+	var (
+		h = &handshake{
+			keyFingerprints: make([]int64, 0, len(cList)),
+			rsaList:         make([]rsaKeyHelper, 0, len(cList)),
+			dh2048p:         dh2048P,
+			dh2048g:         dh2048G,
+		}
+		// rsaList = make([]rsaKeyHelper, 0, len(cList))
+	)
+
+	for _, c := range cList {
+		rsa, err := crypto.NewRSACryptor(c.KeyFile)
+		if err != nil {
+			panic(err)
+		}
+		keyFingerprint, err := strconv.ParseUint(c.KeyFingerprint, 10, 64)
+		if err != nil {
+			panic(err)
+		}
+
+		// TODO: check fingerprint
+
+		h.keyFingerprints = append(h.keyFingerprints, int64(keyFingerprint))
+		h.rsaList = append(h.rsaList, rsaKeyHelper{
+			rsa:            rsa,
+			keyFingerprint: int64(keyFingerprint),
+		})
+	}
+
+	return h
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-func (s *Server) onHandshake(c gnet.Conn, mmsg *mtproto.MTPRawMessage) (interface{}, error) {
-	if len(mmsg.Payload) < 8 {
+func (s *Server) onHandshake(c gnet.Conn, mmsg []byte) (interface{}, error) {
+	if len(mmsg) < 8 {
 		err := fmt.Errorf("invalid data len < 8")
 		// logx.Errorf("conn(%s) onHandshake error: %v", c, err)
 		return nil, err
@@ -163,7 +201,7 @@ func (s *Server) onHandshake(c gnet.Conn, mmsg *mtproto.MTPRawMessage) (interfac
 		return nil, fmt.Errorf("unknown error")
 	}
 
-	_, obj, err := parseFromIncomingMessage(mmsg.Payload[8:])
+	_, obj, err := parseFromIncomingMessage(mmsg[8:])
 	if err != nil {
 		// logx.Errorf("conn(%s) error: %v", c, err)
 		return nil, err
@@ -186,7 +224,7 @@ func (s *Server) onHandshake(c gnet.Conn, mmsg *mtproto.MTPRawMessage) (interfac
 			ServerNonce: resPQ.GetServerNonce(),
 		})
 
-		serializeToBuffer(x, mtproto.GenerateMessageId(), resPQ)
+		_ = serializeToBuffer(x, mtproto.GenerateMessageId(), resPQ)
 		return &mtproto.MTPRawMessage{
 			Payload: x.GetBuf(),
 		}, nil
@@ -205,7 +243,7 @@ func (s *Server) onHandshake(c gnet.Conn, mmsg *mtproto.MTPRawMessage) (interfac
 		})
 
 		logx.Infof("req_pq_multi: nonce: %s, nonce: %s", hex.EncodeToString(request.Nonce), hex.EncodeToString(resPQ.Nonce))
-		serializeToBuffer(x, mtproto.GenerateMessageId(), resPQ)
+		_ = serializeToBuffer(x, mtproto.GenerateMessageId(), resPQ)
 		return &mtproto.MTPRawMessage{
 			Payload: x.GetBuf(),
 		}, nil
@@ -266,6 +304,11 @@ func (s *Server) onHandshake(c gnet.Conn, mmsg *mtproto.MTPRawMessage) (interfac
 
 // req_pq#60469778 nonce:int128 = ResPQ;
 func (s *Server) onReqPq(c gnet.Conn, request *mtproto.TLReqPq) (*mtproto.ResPQ, error) {
+	since := timex.Now()
+	defer func() {
+		logx.WithDuration(timex.Since(since)).Infof("onReqPq: %s", c)
+	}()
+
 	// logx.Infof("req_pq#60469778 - conn(%s) request: %s", c, request)
 
 	// check State and ResState
@@ -281,7 +324,7 @@ func (s *Server) onReqPq(c gnet.Conn, request *mtproto.TLReqPq) (*mtproto.ResPQ,
 		Nonce:                       request.Nonce,
 		ServerNonce:                 crypto.GenerateNonce(16),
 		Pq:                          pq,
-		ServerPublicKeyFingerprints: []int64{int64(s.handshake.keyFingerprint)},
+		ServerPublicKeyFingerprints: s.handshake.keyFingerprints,
 	}).To_ResPQ()
 
 	// logx.Infof("req_pq#60469778 - conn(%s) reply: {\"resPQ\":%s", c, resPQ)
@@ -290,6 +333,11 @@ func (s *Server) onReqPq(c gnet.Conn, request *mtproto.TLReqPq) (*mtproto.ResPQ,
 
 // req_pq_multi#be7e8ef1 nonce:int128 = ResPQ;
 func (s *Server) onReqPqMulti(c gnet.Conn, request *mtproto.TLReqPqMulti) (*mtproto.ResPQ, error) {
+	since := timex.Now()
+	defer func() {
+		logx.WithDuration(timex.Since(since)).Infof("onReqPqMulti: %s", c)
+	}()
+
 	// logx.Infof("req_pq_multi#be7e8ef1 request - conn(%s) request: %s", c, request)
 
 	// check State and ResState
@@ -305,7 +353,7 @@ func (s *Server) onReqPqMulti(c gnet.Conn, request *mtproto.TLReqPqMulti) (*mtpr
 		Nonce:                       request.Nonce,
 		ServerNonce:                 crypto.GenerateNonce(16),
 		Pq:                          pq,
-		ServerPublicKeyFingerprints: []int64{int64(s.handshake.keyFingerprint)},
+		ServerPublicKeyFingerprints: s.handshake.keyFingerprints,
 	}).To_ResPQ()
 
 	// logx.Infof("req_pq_multi#be7e8ef1 - conn(%s) reply: %s", c, resPQ)
@@ -314,6 +362,11 @@ func (s *Server) onReqPqMulti(c gnet.Conn, request *mtproto.TLReqPqMulti) (*mtpr
 
 // req_DH_params#d712e4be nonce:int128 server_nonce:int128 p:string q:string public_key_fingerprint:long encrypted_data:string = Server_DH_Params;
 func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtproto.TLReq_DHParams) (*mtproto.Server_DH_Params, error) {
+	since := timex.Now()
+	defer func() {
+		logx.WithDuration(timex.Since(since)).Infof("onReqDHParams: %s", c)
+	}()
+
 	// logx.Infof("req_DH_params#d712e4be - conn(%s) state: {%s}, request: %s", c, ctx, request)
 
 	var (
@@ -359,27 +412,40 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 		return nil, err
 	}
 
-	if request.PublicKeyFingerprint != int64(s.handshake.keyFingerprint) {
+	rsa := s.handshake.getKey(request.PublicKeyFingerprint)
+	if rsa == nil {
 		err = fmt.Errorf("onReq_DHParams - Invalid PublicKeyFingerprint value")
 		// logx.Errorf("conn(%s) error: %v", c, err)
 		return nil, err
 	}
 
+	since2 := timex.Now()
+
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	s.asyncRun(c.ConnId(),
 		func() error {
+			logx.WithDuration(timex.Since(since2)).Infof("s.asyncRun(c.ConnId()")
 			/*
 				### 4.1) RSA_PAD(data, server_public_key) mentioned above is implemented as follows:
 
-				- data_with_padding := data + random_padding_bytes; — where random_padding_bytes are chosen so that the resulting length of data_with_padding is precisely 192 bytes, and data is the TL-serialized data to be encrypted as before. One has to check that data is not longer than 144 bytes.
-				- data_pad_reversed := BYTE_REVERSE(data_with_padding); — is obtained from data_with_padding by reversing the byte order.
+				- data_with_padding := data + random_padding_bytes; — where random_padding_bytes are chosen so that the
+				  resulting length of data_with_padding is precisely 192 bytes, and data is the TL-serialized data to be encrypted
+				  as before. One has to check that data is not longer than 144 bytes.
+				- data_pad_reversed := BYTE_REVERSE(data_with_padding); — is obtained from data_with_padding by
+				  reversing the byte order.
 				- a random 32-byte temp_key is generated.
-				- data_with_hash := data_pad_reversed + SHA256(temp_key + data_with_padding); — after this assignment, data_with_hash is exactly 224 bytes long.
+				- data_with_hash := data_pad_reversed + SHA256(temp_key + data_with_padding); — after this assignment,
+				  data_with_hash is exactly 224 bytes long.
 				- aes_encrypted := AES256_IGE(data_with_hash, temp_key, 0); — AES256-IGE encryption with zero IV.
 				- temp_key_xor := temp_key XOR SHA256(aes_encrypted); — adjusted key, 32 bytes
 				- key_aes_encrypted := temp_key_xor + aes_encrypted; — exactly 256 bytes (2048 bits) long
-				- The value of key_aes_encrypted is compared with the RSA-modulus of server_pubkey as a big-endian 2048-bit (256-byte) unsigned integer. If key_aes_encrypted turns out to be greater than or equal to the RSA modulus, the previous steps starting from the generation of new random temp_key are repeated. Otherwise the final step is performed:
-				- encrypted_data := RSA(key_aes_encrypted, server_pubkey); — 256-byte big-endian integer is elevated to the requisite power from the RSA public key modulo the RSA modulus, and the result is stored as a big-endian integer consisting of exactly 256 bytes (with leading zero bytes if required).
+				- The value of key_aes_encrypted is compared with the RSA-modulus of server_pubkey as a big-endian 2048-bit
+				  (256-byte) unsigned integer. If key_aes_encrypted turns out to be greater than or equal to the RSA modulus, the
+				  previous steps starting from the generation of new random temp_key are repeated. Otherwise the final step is
+				  performed:
+				- encrypted_data := RSA(key_aes_encrypted, server_pubkey); — 256-byte big-endian integer is elevated to
+				  the requisite power from the RSA public key modulo the RSA modulus, and the result is stored as a big-endian
+				  integer consisting of exactly 256 bytes (with leading zero bytes if required).
 			*/
 
 			// encryptedData := []byte(request.EncryptedData)
@@ -393,11 +459,12 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 
 			//
 			// 1. 解密
-			innerData := s.handshake.rsa.Decrypt([]byte(request.EncryptedData))
+			innerData := rsa.Decrypt([]byte(request.EncryptedData))
 			if len(innerData) != 256 {
 				logx.Error("need len(encryptedPQInnerData) < 256")
 				return fmt.Errorf("process Req_DHParams - len(encryptedPQInnerData) != 256")
 			}
+			logx.WithDuration(timex.Since(since2)).Infof("innerData := rsa.Decrypt([]byte(request.EncryptedData))")
 
 			// void Datacenter::aesIgeEncryption(uint8_t *buffer, uint8_t *key, uint8_t *iv, bool encrypt, bool changeIv, uint32_t length) {
 			// Datacenter::aesIgeEncryption(
@@ -564,6 +631,7 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 
 			e := crypto.NewAES256IGECryptor(tmpAesKeyAndIV[:32], tmpAesKeyAndIV[32:64])
 			tmpEncryptedAnswer, _ = e.Encrypt(tmpEncryptedAnswer)
+			logx.WithDuration(timex.Since(since2)).Infof("tmpEncryptedAnswer, _ = e.Encrypt(tmpEncryptedAnswer)")
 
 			serverDHParams = mtproto.MakeTLServer_DHParamsOk(&mtproto.Server_DH_Params{
 				Nonce:           request.Nonce,
@@ -574,6 +642,7 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 			return nil
 		},
 		func(c gnet.Conn) {
+			logx.WithDuration(timex.Since(since2)).Infof("func(c gnet.Conn) {")
 			// logx.Infof("c.UnThreadSafeWrite - conn(%s)", c)
 			ctx.HandshakeType = handshakeType
 			ctx.ExpiresIn = expiresIn
@@ -583,10 +652,11 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 			ctx.State = STATE_DH_params_res
 
 			x := mtproto.NewEncodeBuf(512)
-			serializeToBuffer(x, mtproto.GenerateMessageId(), serverDHParams)
-			UnThreadSafeWrite(c, &mtproto.MTPRawMessage{
+			_ = serializeToBuffer(x, mtproto.GenerateMessageId(), serverDHParams)
+			_ = UnThreadSafeWrite(c, &mtproto.MTPRawMessage{
 				Payload: x.GetBuf(),
 			})
+			logx.WithDuration(timex.Since(since2)).Infof("_ = UnThreadSafeWrite(c, &mtproto.MTPRawMessage{")
 		})
 
 	return nil, nil
@@ -594,6 +664,11 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 
 // set_client_DH_params#f5045f1f nonce:int128 server_nonce:int128 encrypted_data:string = Set_client_DH_params_answer;
 func (s *Server) onSetClientDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtproto.TLSetClient_DHParams) (*mtproto.SetClient_DHParamsAnswer, error) {
+	since := timex.Now()
+	defer func() {
+		logx.WithDuration(timex.Since(since)).Infof("onSetClientDHParams: %s", c)
+	}()
+
 	logx.Infof("set_client_DH_params#f5045f1f conn(%s) - state: {%s}, request: %s", c, ctx, request)
 
 	// TODO(@benqi): Impl SetClient_DHParams logic
@@ -631,6 +706,7 @@ func (s *Server) onSetClientDHParams(c gnet.Conn, ctx *HandshakeStateCtx, reques
 		// logx.Errorf("conn(%s) error: %v", c, err)
 		return nil, err
 	}
+	logx.WithDuration(timex.Since(since)).Infof("decryptedData, err := d.Decrypt(bEncryptedData): %s", c)
 
 	// TODO(@benqi): 检查签名是否合法
 	dBuf := mtproto.NewDecodeBuf(decryptedData[20:])
@@ -677,6 +753,8 @@ func (s *Server) onSetClientDHParams(c gnet.Conn, ctx *HandshakeStateCtx, reques
 	authKeyAuxHash = append(authKeyAuxHash, sha1D[:]...)
 	sha1E := sha1.Sum(authKeyAuxHash[:len(authKeyAuxHash)-12])
 	authKeyAuxHash = append(authKeyAuxHash, sha1E[:]...)
+
+	logx.WithDuration(timex.Since(since)).Infof("authKeyAuxHash = append(authKeyAuxHash, sha1E[:]...): %s", c)
 
 	// 至此key已经创建成功
 	var (
@@ -729,6 +807,11 @@ func (s *Server) onSetClientDHParams(c gnet.Conn, ctx *HandshakeStateCtx, reques
 
 // msgs_ack#62d6b459 msg_ids:Vector<long> = MsgsAck;
 func (s *Server) onMsgsAck(c gnet.Conn, state *HandshakeStateCtx, request *mtproto.TLMsgsAck) error {
+	since := timex.Now()
+	defer func() {
+		logx.WithDuration(timex.Since(since)).Infof("onMsgsAck: %s", c)
+	}()
+
 	logx.Infof("msgs_ack#62d6b459 conn(%s) - state: {%s}, request: %s", c, state, request)
 
 	switch state.State {

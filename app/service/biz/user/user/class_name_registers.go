@@ -2,7 +2,7 @@
  * WARNING! All changes made in this file will be lost!
  * Created from 'scheme.tl' by 'mtprotoc'
  *
- * Copyright (c) 2024-present,  Teamgram Authors.
+ * Copyright (c) 2025-present,  Teamgram Authors.
  *  All rights reserved.
  *
  * Author: Benqi (wubenqi@gmail.com)
@@ -16,6 +16,7 @@ const (
 	Predicate_usersIdFound                      = "usersIdFound"
 	Predicate_peerPeerNotifySettings            = "peerPeerNotifySettings"
 	Predicate_lastSeenData                      = "lastSeenData"
+	Predicate_botInfoData                       = "botInfoData"
 	Predicate_user_getLastSeens                 = "user_getLastSeens"
 	Predicate_user_updateLastSeen               = "user_updateLastSeen"
 	Predicate_user_getLastSeen                  = "user_getLastSeen"
@@ -90,6 +91,10 @@ const (
 	Predicate_user_setStoriesHidden             = "user_setStoriesHidden"
 	Predicate_user_updatePersonalChannel        = "user_updatePersonalChannel"
 	Predicate_user_getUserIdByPhone             = "user_getUserIdByPhone"
+	Predicate_user_setAuthorizationTTL          = "user_setAuthorizationTTL"
+	Predicate_user_getAuthorizationTTL          = "user_getAuthorizationTTL"
+	Predicate_user_updatePremium                = "user_updatePremium"
+	Predicate_user_getBotInfoV2                 = "user_getBotInfoV2"
 )
 
 var clazzNameRegisters2 = map[string]map[int]int32{
@@ -111,6 +116,10 @@ var clazzNameRegisters2 = map[string]map[int]int32{
 	},
 	Predicate_lastSeenData: {
 		0: -1280204321, // 0xb3b1a1df
+
+	},
+	Predicate_botInfoData: {
+		0: 25386268, // 0x1835d1c
 
 	},
 	Predicate_user_getLastSeens: {
@@ -210,7 +219,7 @@ var clazzNameRegisters2 = map[string]map[int]int32{
 
 	},
 	Predicate_user_deleteUser: {
-		0: 2132777160, // 0x7f1f98c8
+		0: 1651358992, // 0x626dbd10
 
 	},
 	Predicate_user_blockPeer: {
@@ -362,7 +371,7 @@ var clazzNameRegisters2 = map[string]map[int]int32{
 
 	},
 	Predicate_user_updateBotData: {
-		0: -1174586898, // 0xb9fd39ee
+		0: 1626561832, // 0x60f35d28
 
 	},
 	Predicate_user_getImmutableUserV2: {
@@ -409,6 +418,22 @@ var clazzNameRegisters2 = map[string]map[int]int32{
 		0: -72645694, // 0xfbab83c2
 
 	},
+	Predicate_user_setAuthorizationTTL: {
+		0: -702417936, // 0xd621f3f0
+
+	},
+	Predicate_user_getAuthorizationTTL: {
+		0: -563197636, // 0xde6e493c
+
+	},
+	Predicate_user_updatePremium: {
+		0: -1173824359, // 0xba08dc99
+
+	},
+	Predicate_user_getBotInfoV2: {
+		0: -738419547, // 0xd3fc9ca5
+
+	},
 }
 
 var clazzIdNameRegisters2 = map[int32]string{
@@ -417,6 +442,7 @@ var clazzIdNameRegisters2 = map[int32]string{
 	-2134594054: Predicate_usersIdFound,                      // 0x80c4adfa
 	1894399913:  Predicate_peerPeerNotifySettings,            // 0x70ea3fa9
 	-1280204321: Predicate_lastSeenData,                      // 0xb3b1a1df
+	25386268:    Predicate_botInfoData,                       // 0x1835d1c
 	2090958337:  Predicate_user_getLastSeens,                 // 0x7ca17e01
 	-46114259:   Predicate_user_updateLastSeen,               // 0xfd405a2d
 	-1860581154: Predicate_user_getLastSeen,                  // 0x9119c8de
@@ -441,7 +467,7 @@ var clazzIdNameRegisters2 = map[int32]string{
 	1586043239:  Predicate_user_deletePeerSettings,           // 0x5e891967
 	-8759461:    Predicate_user_changePhone,                  // 0xff7a575b
 	2044729473:  Predicate_user_createNewUser,                // 0x79e01881
-	2132777160:  Predicate_user_deleteUser,                   // 0x7f1f98c8
+	1651358992:  Predicate_user_deleteUser,                   // 0x626dbd10
 	-2130301264: Predicate_user_blockPeer,                    // 0x81062eb0
 	-555280883:  Predicate_user_unBlockPeer,                  // 0xdee7160d
 	-1147140722: Predicate_user_blockedByUser,                // 0xbba0058e
@@ -479,7 +505,7 @@ var clazzIdNameRegisters2 = map[int32]string{
 	-2121142279: Predicate_user_getUserDataListByIdList,      // 0x8191eff9
 	1057580446:  Predicate_user_getUserDataByToken,           // 0x3f09659e
 	1882568397:  Predicate_user_search,                       // 0x7035b6cd
-	-1174586898: Predicate_user_updateBotData,                // 0xb9fd39ee
+	1626561832:  Predicate_user_updateBotData,                // 0x60f35d28
 	806009420:   Predicate_user_getImmutableUserV2,           // 0x300aba4c
 	-1795585240: Predicate_user_getMutableUsersV2,            // 0x94f98b28
 	1282329771:  Predicate_user_createNewTestUser,            // 0x4c6eccab
@@ -491,6 +517,10 @@ var clazzIdNameRegisters2 = map[int32]string{
 	-138012584:  Predicate_user_setStoriesHidden,             // 0xf7c61858
 	-940065072:  Predicate_user_updatePersonalChannel,        // 0xc7f7bed0
 	-72645694:   Predicate_user_getUserIdByPhone,             // 0xfbab83c2
+	-702417936:  Predicate_user_setAuthorizationTTL,          // 0xd621f3f0
+	-563197636:  Predicate_user_getAuthorizationTTL,          // 0xde6e493c
+	-1173824359: Predicate_user_updatePremium,                // 0xba08dc99
+	-738419547:  Predicate_user_getBotInfoV2,                 // 0xd3fc9ca5
 
 }
 

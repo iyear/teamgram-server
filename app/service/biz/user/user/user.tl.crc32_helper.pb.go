@@ -2,7 +2,7 @@
  * WARNING! All changes made in this file will be lost!
  * Created from 'scheme.tl' by 'mtprotoc'
  *
- * Copyright (c) 2024-present,  Teamgram Authors.
+ * Copyright (c) 2025-present,  Teamgram Authors.
  *  All rights reserved.
  *
  * Author: Benqi (wubenqi@gmail.com)
@@ -17,6 +17,7 @@ const (
 	CRC32_usersIdFound                      TLConstructor = -2134594054 // 0x80c4adfa
 	CRC32_peerPeerNotifySettings            TLConstructor = 1894399913  // 0x70ea3fa9
 	CRC32_lastSeenData                      TLConstructor = -1280204321 // 0xb3b1a1df
+	CRC32_botInfoData                       TLConstructor = 25386268    // 0x1835d1c
 	CRC32_user_getLastSeens                 TLConstructor = 2090958337  // 0x7ca17e01
 	CRC32_user_updateLastSeen               TLConstructor = -46114259   // 0xfd405a2d
 	CRC32_user_getLastSeen                  TLConstructor = -1860581154 // 0x9119c8de
@@ -41,7 +42,7 @@ const (
 	CRC32_user_deletePeerSettings           TLConstructor = 1586043239  // 0x5e891967
 	CRC32_user_changePhone                  TLConstructor = -8759461    // 0xff7a575b
 	CRC32_user_createNewUser                TLConstructor = 2044729473  // 0x79e01881
-	CRC32_user_deleteUser                   TLConstructor = 2132777160  // 0x7f1f98c8
+	CRC32_user_deleteUser                   TLConstructor = 1651358992  // 0x626dbd10
 	CRC32_user_blockPeer                    TLConstructor = -2130301264 // 0x81062eb0
 	CRC32_user_unBlockPeer                  TLConstructor = -555280883  // 0xdee7160d
 	CRC32_user_blockedByUser                TLConstructor = -1147140722 // 0xbba0058e
@@ -79,7 +80,7 @@ const (
 	CRC32_user_getUserDataListByIdList      TLConstructor = -2121142279 // 0x8191eff9
 	CRC32_user_getUserDataByToken           TLConstructor = 1057580446  // 0x3f09659e
 	CRC32_user_search                       TLConstructor = 1882568397  // 0x7035b6cd
-	CRC32_user_updateBotData                TLConstructor = -1174586898 // 0xb9fd39ee
+	CRC32_user_updateBotData                TLConstructor = 1626561832  // 0x60f35d28
 	CRC32_user_getImmutableUserV2           TLConstructor = 806009420   // 0x300aba4c
 	CRC32_user_getMutableUsersV2            TLConstructor = -1795585240 // 0x94f98b28
 	CRC32_user_createNewTestUser            TLConstructor = 1282329771  // 0x4c6eccab
@@ -91,4 +92,8 @@ const (
 	CRC32_user_setStoriesHidden             TLConstructor = -138012584  // 0xf7c61858
 	CRC32_user_updatePersonalChannel        TLConstructor = -940065072  // 0xc7f7bed0
 	CRC32_user_getUserIdByPhone             TLConstructor = -72645694   // 0xfbab83c2
+	CRC32_user_setAuthorizationTTL          TLConstructor = -702417936  // 0xd621f3f0
+	CRC32_user_getAuthorizationTTL          TLConstructor = -563197636  // 0xde6e493c
+	CRC32_user_updatePremium                TLConstructor = -1173824359 // 0xba08dc99
+	CRC32_user_getBotInfoV2                 TLConstructor = -738419547  // 0xd3fc9ca5
 )

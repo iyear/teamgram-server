@@ -37,6 +37,7 @@ import (
 	miscellaneous_helper "github.com/teamgram/teamgram-server/app/bff/miscellaneous"
 	notification_helper "github.com/teamgram/teamgram-server/app/bff/notification"
 	nsfw_helper "github.com/teamgram/teamgram-server/app/bff/nsfw"
+	passport_helper "github.com/teamgram/teamgram-server/app/bff/passport"
 	premium_helper "github.com/teamgram/teamgram-server/app/bff/premium"
 	privacysettingshelper "github.com/teamgram/teamgram-server/app/bff/privacysettings"
 	qrcode_helper "github.com/teamgram/teamgram-server/app/bff/qrcode"
@@ -172,6 +173,15 @@ func (s *Server) Initialize() error {
 				MediaClient:   c.MediaClient,
 			}, nil, nil))
 
+		// passport_helper
+		mtproto.RegisterRPCPassportServer(
+			grpcServer,
+			passport_helper.New(passport_helper.Config{
+				RpcServerConf:     c.RpcServerConf,
+				AuthsessionClient: c.AuthSessionClient,
+				UserClient:        c.BizServiceClient,
+			}))
+
 		// updates_helper
 		mtproto.RegisterRPCUpdatesServer(
 			grpcServer,
@@ -264,6 +274,7 @@ func (s *Server) Initialize() error {
 					DialogClient:  c.BizServiceClient,
 				},
 				nil,
+				nil,
 				nil))
 
 		// nsfw_helper
@@ -284,13 +295,18 @@ func (s *Server) Initialize() error {
 		// account_helper
 		mtproto.RegisterRPCAccountServer(
 			grpcServer,
-			account_helper.New(account_helper.Config{
-				RpcServerConf:     c.RpcServerConf,
-				UserClient:        c.BizServiceClient,
-				AuthsessionClient: c.AuthSessionClient,
-				ChatClient:        c.BizServiceClient,
-				SyncClient:        c.SyncClient,
-			}))
+			account_helper.New(
+				account_helper.Config{
+					RpcServerConf:     c.RpcServerConf,
+					KV:                c.KV,
+					UserClient:        c.BizServiceClient,
+					AuthsessionClient: c.AuthSessionClient,
+					ChatClient:        c.BizServiceClient,
+					SyncClient:        c.SyncClient,
+					UsernameClient:    c.BizServiceClient,
+				},
+				nil,
+				nil))
 		// usernames_helper
 		mtproto.RegisterRPCUsernamesServer(
 			grpcServer,

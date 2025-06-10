@@ -30,11 +30,11 @@ import (
 func (c *SessionCore) SessionPushRpcResultData(in *session.TLSessionPushRpcResultData) (*mtproto.Bool, error) {
 	mainAuth := c.svcCtx.MainAuthMgr.GetMainAuthWrapper(in.PermAuthKeyId)
 	if mainAuth == nil {
-		err := fmt.Errorf("not found authKeyId(%d)", in.PermAuthKeyId)
+		err := fmt.Errorf("not found authKeyId(%s)", in)
 		c.Logger.Errorf("session.pushRpcResultData - %v", err)
 		return nil, err
 	}
-	mainAuth.SyncRpcResultDataArrived(c.ctx, in.AuthKeyId, in.SessionId, in.ClientReqMsgId, in.RpcResultData)
+	_ = mainAuth.SyncRpcResultDataArrived(c.ctx, in.AuthKeyId, in.SessionId, in.ClientReqMsgId, in.RpcResultData)
 
 	return mtproto.BoolTrue, nil
 }

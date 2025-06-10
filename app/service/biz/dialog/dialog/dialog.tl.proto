@@ -2,7 +2,7 @@
  * WARNING! All changes made in this file will be lost!
  * Created from 'scheme.tl' by 'mtprotoc'
  *
- * Copyright (c) 2024-present,  Teamgram Authors.
+ * Copyright (c) 2025-present,  Teamgram Authors.
  *  All rights reserved.
  *
  * Author: Benqi (wubenqi@gmail.com)
@@ -22,7 +22,7 @@ option go_package = "github.com/teamgram/teamgram-server/app/service/biz/dialog/
 enum TLConstructor {
     CRC32_UNKNOWN = 0;
     CRC32_updateDraftMessage = -155335502;
-    CRC32_dialogExt = -1109809056;
+    CRC32_dialogExt = 1930144063;
     CRC32_dialogPinnedExt = 245834284;
     CRC32_dialogFilterExt = -1496016642;
     CRC32_simpleDialogsData = 492418141;
@@ -42,9 +42,7 @@ enum TLConstructor {
     CRC32_dialog_reorderPinnedDialogs = -18664089;
     CRC32_dialog_getDialogById = -1587594251;
     CRC32_dialog_getTopMessage = -92425614;
-    CRC32_dialog_updateReadInbox = 489158840;
-    CRC32_dialog_updateReadOutbox = 1483799934;
-    CRC32_dialog_insertOrUpdateDialog = 382601889;
+    CRC32_dialog_insertOrUpdateDialog = 1563133986;
     CRC32_dialog_deleteDialog = 28515811;
     CRC32_dialog_getUserPinnedMessage = -1885617487;
     CRC32_dialog_updateUserPinnedMessage = 371388970;
@@ -66,6 +64,9 @@ enum TLConstructor {
     CRC32_dialog_getDialogFilterBySlug = 1313177583;
     CRC32_dialog_createDialogFilter = -959749265;
     CRC32_dialog_updateUnreadCount = 732705613;
+    CRC32_dialog_toggleDialogFilterTags = -1597149815;
+    CRC32_dialog_getDialogFilterTags = -84870505;
+    CRC32_dialog_setChatWallpaper = -1252926702;
 }
 
 
@@ -81,6 +82,8 @@ message DialogExt {
     int64 date = 6;
     string theme_emoticon = 7;
     int32 ttl_period = 8;
+    int64 wallpaper_id = 9;
+    bool wallpaper_overridden = 10;
 }
 
 message TL_dialogExt {
@@ -289,24 +292,6 @@ message TL_dialog_getTopMessage {
 }
 
 //--------------------------------------------------------------------------------------------
-message TL_dialog_updateReadInbox {
-    TLConstructor  constructor = 1;
-    int64 user_id = 3;
-    int32 peer_type = 4;
-    int64 peer_id = 5;
-    int32 read_inbox_id = 6;
-}
-
-//--------------------------------------------------------------------------------------------
-message TL_dialog_updateReadOutbox {
-    TLConstructor  constructor = 1;
-    int64 user_id = 3;
-    int32 peer_type = 4;
-    int64 peer_id = 5;
-    int32 read_outbox_id = 6;
-}
-
-//--------------------------------------------------------------------------------------------
 message TL_dialog_insertOrUpdateDialog {
     TLConstructor  constructor = 1;
     int64 user_id = 3;
@@ -318,6 +303,7 @@ message TL_dialog_insertOrUpdateDialog {
     google.protobuf.Int32Value unread_count = 9;
     bool unread_mark = 10;
     google.protobuf.Int64Value date2 = 11;
+    google.protobuf.Int32Value pinned_msg_id = 12;
 }
 
 //--------------------------------------------------------------------------------------------
@@ -488,6 +474,29 @@ message TL_dialog_updateUnreadCount {
     google.protobuf.Int32Value unread_reactions_count = 8;
 }
 
+//--------------------------------------------------------------------------------------------
+message TL_dialog_toggleDialogFilterTags {
+    TLConstructor  constructor = 1;
+    int64 user_id = 3;
+    mtproto.Bool enabled = 4;
+}
+
+//--------------------------------------------------------------------------------------------
+message TL_dialog_getDialogFilterTags {
+    TLConstructor  constructor = 1;
+    int64 user_id = 3;
+}
+
+//--------------------------------------------------------------------------------------------
+message TL_dialog_setChatWallpaper {
+    TLConstructor  constructor = 1;
+    int64 user_id = 3;
+    int32 peer_type = 4;
+    int64 peer_id = 5;
+    int64 wallpaper_id = 6;
+    bool wallpaper_overridden = 7;
+}
+
 
 //--------------------------------------------------------------------------------------------
 // Vector api result type
@@ -530,8 +539,6 @@ service RPCDialog {
  rpc dialog_reorderPinnedDialogs(TL_dialog_reorderPinnedDialogs) returns (mtproto.Bool) {}
  rpc dialog_getDialogById(TL_dialog_getDialogById) returns (DialogExt) {}
  rpc dialog_getTopMessage(TL_dialog_getTopMessage) returns (mtproto.Int32) {}
- rpc dialog_updateReadInbox(TL_dialog_updateReadInbox) returns (mtproto.Bool) {}
- rpc dialog_updateReadOutbox(TL_dialog_updateReadOutbox) returns (mtproto.Bool) {}
  rpc dialog_insertOrUpdateDialog(TL_dialog_insertOrUpdateDialog) returns (mtproto.Bool) {}
  rpc dialog_deleteDialog(TL_dialog_deleteDialog) returns (mtproto.Bool) {}
  rpc dialog_getUserPinnedMessage(TL_dialog_getUserPinnedMessage) returns (mtproto.Int32) {}
@@ -554,5 +561,8 @@ service RPCDialog {
  rpc dialog_getDialogFilterBySlug(TL_dialog_getDialogFilterBySlug) returns (DialogFilterExt) {}
  rpc dialog_createDialogFilter(TL_dialog_createDialogFilter) returns (DialogFilterExt) {}
  rpc dialog_updateUnreadCount(TL_dialog_updateUnreadCount) returns (mtproto.Bool) {}
+ rpc dialog_toggleDialogFilterTags(TL_dialog_toggleDialogFilterTags) returns (mtproto.Bool) {}
+ rpc dialog_getDialogFilterTags(TL_dialog_getDialogFilterTags) returns (mtproto.Bool) {}
+ rpc dialog_setChatWallpaper(TL_dialog_setChatWallpaper) returns (mtproto.Bool) {}
 }
 

@@ -347,6 +347,36 @@ func (c *session) onInvokeWithApnsSecret(ctx context.Context, gatewayId, clientI
 	c.processMsg(ctx, gatewayId, clientIp, msgId, query)
 }
 
+// onInvokeWithReCaptcha
+func (c *session) onInvokeWithReCaptcha(ctx context.Context, gatewayId, clientIp string, msgId *inboxMsg, request *mtproto.TLInvokeWithReCaptcha) {
+	logx.WithContext(ctx).Infof("onInvokeWithReCaptcha - request data: {sess: %s, conn_id: %s, msg_id: %d, seq_no: %d, nonce: %s, secret: %s, request: {%s}}",
+		c,
+		gatewayId,
+		msgId.msgId,
+		msgId.seqNo,
+		request.Token,
+		reflect.TypeOf(request))
+
+	if request.GetQuery() == nil {
+		logx.WithContext(ctx).Errorf("onInvokeWithReCaptcha Query is nil, query: {%s}", request)
+		return
+	}
+
+	dBuf := mtproto.NewDecodeBuf(request.Query)
+	query := dBuf.Object()
+	if dBuf.GetError() != nil {
+		logx.WithContext(ctx).Errorf("dBuf query error: %v", dBuf.GetError())
+		return
+	}
+
+	if query == nil {
+		logx.WithContext(ctx).Errorf("decode buf is nil, query: %v", query)
+		return
+	}
+
+	c.processMsg(ctx, gatewayId, clientIp, msgId, query)
+}
+
 func (c *session) onInitConnection(ctx context.Context, gatewayId, clientIp string, msgId *inboxMsg, request *mtproto.TLInitConnection) {
 	logx.WithContext(ctx).Infof("onInitConnection - request data: {sess: %s, conn_id: %s, msg_id: %d, seq_no: %d, request: {%s}}",
 		c,
@@ -396,10 +426,14 @@ func (c *session) onRpcRequest(ctx context.Context, gatewayId, clientIp string, 
 		}
 	case *mtproto.TLUpdatesGetState:
 		c.sessList.cb.onSetMainUpdatesSession(ctx, c)
+		c.canSync = false
 	case *mtproto.TLUpdatesGetDifference:
 		c.sessList.cb.onSetMainUpdatesSession(ctx, c)
+		c.canSync = false
+		//
 	case *mtproto.TLUpdatesGetChannelDifference:
 		c.sessList.cb.onSetMainUpdatesSession(ctx, c)
+		c.canSync = false
 		//case *mtproto.TLAuthBindTempAuthKey:
 		//	res, err := c.AuthSessionRpcClient.AuthBindTempAuthKey(context.Background(), query.(*mtproto.TLAuthBindTempAuthKey))
 		//	if err != nil {
@@ -472,6 +506,7 @@ func (c *session) onRpcResult(ctx context.Context, rpcResult *rpcApiMessage) {
 		return
 	}
 
+	hasCanSync := false
 	switch request := rpcResult.reqMsg.(type) {
 	case *mtproto.TLAuthBindTempAuthKey:
 		if rpcErr != nil {
@@ -554,10 +589,31 @@ func (c *session) onRpcResult(ctx context.Context, rpcResult *rpcApiMessage) {
 				c.sessList.cb.changeAuthState(ctx, mtproto.AuthStateNormal, authAuthorization.GetUser().GetId())
 			}
 		}
+	case *mtproto.TLAuthRecoverPassword:
+		if rpcErr == nil && c.sessList.cb.state == mtproto.AuthStateNeedPassword {
+			authAuthorization, _ := rpcResult.rpcResult.Result.(*mtproto.Auth_Authorization)
+			if authAuthorization.GetPredicateName() == mtproto.Predicate_auth_authorization {
+				c.sessList.cb.changeAuthState(ctx, mtproto.AuthStateNormal, authAuthorization.GetUser().GetId())
+			}
+		}
+	case *mtproto.TLUpdatesGetState:
+		hasCanSync = true
+		// c.canSync = true
+	case *mtproto.TLUpdatesGetDifference:
+		hasCanSync = true
+		// c.canSync = true
+	case *mtproto.TLUpdatesGetChannelDifference:
+		hasCanSync = true
+		// c.canSync = true
 	default:
 	}
 
 	c.sendRpcResult(ctx, rpcResult.MoveRpcResult())
+	if hasCanSync {
+		c.canSync = true
+		gatewayId := c.getGatewayId()
+		c.sendQueueToGateway(ctx, gatewayId)
+	}
 }
 
 func (c *session) sendRpcResult(ctx context.Context, rpcResult *mtproto.TLRpcResult) {

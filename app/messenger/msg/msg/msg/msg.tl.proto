@@ -2,7 +2,7 @@
  * WARNING! All changes made in this file will be lost!
  * Created from 'scheme.tl' by 'mtprotoc'
  *
- * Copyright (c) 2024-present,  Teamgram Authors.
+ * Copyright (c) 2025-present,  Teamgram Authors.
  *  All rights reserved.
  *
  * Author: Benqi (wubenqi@gmail.com)
@@ -27,7 +27,6 @@ enum TLConstructor {
     CRC32_msg_pushUserMessage = 902887962;
     CRC32_msg_readMessageContents = 673481940;
     CRC32_msg_sendMessageV2 = -188056380;
-    CRC32_msg_editMessage = -2129725231;
     CRC32_msg_editMessageV2 = 1778278369;
     CRC32_msg_deleteMessages = 568855069;
     CRC32_msg_deleteHistory = 1975576778;
@@ -125,17 +124,6 @@ message TL_msg_sendMessageV2 {
     int32 peer_type = 5;
     int64 peer_id = 6;
     repeated OutboxMessage message = 7;
-}
-
-//--------------------------------------------------------------------------------------------
-message TL_msg_editMessage {
-    TLConstructor  constructor = 1;
-    int64 user_id = 3;
-    int64 auth_key_id = 4;
-    int32 peer_type = 5;
-    int64 peer_id = 6;
-    int32 edit_type = 7;
-    OutboxMessage message = 8;
 }
 
 //--------------------------------------------------------------------------------------------
@@ -242,7 +230,6 @@ service RPCMsg {
  rpc msg_pushUserMessage(TL_msg_pushUserMessage) returns (mtproto.Bool) {}
  rpc msg_readMessageContents(TL_msg_readMessageContents) returns (mtproto.messages_AffectedMessages) {}
  rpc msg_sendMessageV2(TL_msg_sendMessageV2) returns (mtproto.Updates) {}
- rpc msg_editMessage(TL_msg_editMessage) returns (mtproto.Updates) {}
  rpc msg_editMessageV2(TL_msg_editMessageV2) returns (mtproto.Updates) {}
  rpc msg_deleteMessages(TL_msg_deleteMessages) returns (mtproto.messages_AffectedMessages) {}
  rpc msg_deleteHistory(TL_msg_deleteHistory) returns (mtproto.messages_AffectedHistory) {}

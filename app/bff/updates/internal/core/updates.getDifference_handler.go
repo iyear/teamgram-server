@@ -19,10 +19,10 @@
 package core
 
 import (
-	"github.com/teamgram/teamgram-server/app/service/authsession/authsession"
 	"time"
 
 	"github.com/teamgram/proto/mtproto"
+	"github.com/teamgram/teamgram-server/app/service/authsession/authsession"
 	chatpb "github.com/teamgram/teamgram-server/app/service/biz/chat/chat"
 	"github.com/teamgram/teamgram-server/app/service/biz/updates/updates"
 	userpb "github.com/teamgram/teamgram-server/app/service/biz/user/user"
@@ -45,7 +45,7 @@ func (c *UpdatesCore) UpdatesGetDifference(in *mtproto.TLUpdatesGetDifference) (
 		UserId:        c.MD.UserId,
 		Pts:           in.Pts,
 		PtsTotalLimit: in.PtsTotalLimit,
-		Date:          int64(in.Date) - 1,
+		Date:          int64(in.Date),
 	})
 	if err != nil {
 		c.Logger.Errorf("updates.getDifference - error: %v", err)

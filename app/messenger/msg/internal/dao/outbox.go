@@ -35,6 +35,7 @@ import (
 
 	"github.com/zeromicro/go-zero/core/jsonx"
 	"github.com/zeromicro/go-zero/core/logx"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 func makeMessageBoxByDO(boxDO *dataobject.MessagesDO) *mtproto.MessageBox {
@@ -292,6 +293,11 @@ func (d *Dao) SendUserMessage(ctx context.Context, fromId, toId int64, outBox *m
 func (d *Dao) SendUserMessageV2(ctx context.Context, fromId, toId int64, outBox *msg.OutboxMessage, out bool) (*mtproto.MessageBox, error) {
 	peer := &mtproto.PeerUtil{PeerType: mtproto.PEER_USER, PeerId: toId}
 	return d.sendMessageToOutboxV2(ctx, fromId, peer, outBox, out)
+}
+
+func (d *Dao) SendUserMessageV3(ctx context.Context, fromId, toId int64, outBox *msg.OutboxMessage, out bool) (*mtproto.MessageBox, error) {
+	peer := &mtproto.PeerUtil{PeerType: mtproto.PEER_USER, PeerId: toId}
+	return d.sendMessageToOutboxV3(ctx, fromId, peer, outBox, out)
 }
 
 func (d *Dao) SendUserMultiMessage(ctx context.Context, fromId, toId int64, outBoxList []*msg.OutboxMessage) ([]*mtproto.MessageBox, error) {
@@ -570,13 +576,9 @@ func (d *Dao) SendMessageToOutboxV1(ctx context.Context, fromId int64, peer *mtp
 	message := outMsgBox.Message
 	mData, _ := jsonx.Marshal(outMsgBox.GetMessage())
 	outBoxMsgId := outMsgBox.MessageId
-	// dialogMessageId := outMsgBox.DialogMessageId
 
 	var (
 		savedPeerUtil *mtproto.PeerUtil
-		outBoxDO      *dataobject.MessagesDO
-
-		dialogDO *dataobject.DialogsDO
 	)
 
 	if message.GetSavedPeerId() != nil {
@@ -586,81 +588,37 @@ func (d *Dao) SendMessageToOutboxV1(ctx context.Context, fromId int64, peer *mtp
 	}
 
 	tR := sqlx.TxWrapper(ctx, d.DB, func(tx *sqlx.Tx, result *sqlx.StoreResult) {
-		outBoxDO = &dataobject.MessagesDO{
-			UserId:            outMsgBox.UserId,
-			UserMessageBoxId:  outMsgBox.MessageId,
-			DialogId1:         outMsgBox.DialogId1,
-			DialogId2:         outMsgBox.DialogId2,
-			DialogMessageId:   outMsgBox.DialogMessageId,
-			SenderUserId:      outMsgBox.UserId,
-			PeerType:          peer.PeerType,
-			PeerId:            peer.PeerId,
-			RandomId:          outMsgBox.RandomId,
-			MessageFilterType: outMsgBox.MessageFilterType,
-			MessageData:       hack.String(mData),
-			Message:           message.GetMessage(),
-			Mentioned:         false,
-			MediaUnread:       message.GetMediaUnread(),
-			Date2:             int64(outMsgBox.Message.Date),
-			SavedPeerType:     savedPeerUtil.PeerType,
-			SavedPeerId:       savedPeerUtil.PeerId,
-			Deleted:           false,
-		}
-
-		lastInsertId, rowsAffected, err := d.MessagesDAO.InsertOrReturnIdTx(tx, outBoxDO)
+		_, _, err := d.MessagesDAO.InsertOrReturnIdTx(
+			tx,
+			&dataobject.MessagesDO{
+				UserId:            outMsgBox.UserId,
+				UserMessageBoxId:  outMsgBox.MessageId,
+				DialogId1:         outMsgBox.DialogId1,
+				DialogId2:         outMsgBox.DialogId2,
+				DialogMessageId:   outMsgBox.DialogMessageId,
+				SenderUserId:      outMsgBox.UserId,
+				PeerType:          peer.PeerType,
+				PeerId:            peer.PeerId,
+				RandomId:          outMsgBox.RandomId,
+				MessageFilterType: outMsgBox.MessageFilterType,
+				MessageData:       hack.String(mData),
+				Message:           message.GetMessage(),
+				Mentioned:         false,
+				MediaUnread:       message.GetMediaUnread(),
+				Date2:             int64(outMsgBox.Message.Date),
+				SavedPeerType:     savedPeerUtil.PeerType,
+				SavedPeerId:       savedPeerUtil.PeerId,
+				Deleted:           false,
+			})
 		if err != nil {
 			result.Err = err
-			return
-		}
-
-		if rowsAffected == 0 {
-			// TODO(@benqi): random_id已经存在
-			if lastInsertId > 0 {
-				result.Data = lastInsertId
-				return
-			} else {
-				result.Err = errors.New("insert error")
-				return
-			}
-		}
-
-		switch peer.PeerType {
-		case mtproto.PEER_USER:
-			dialogDO = &dataobject.DialogsDO{
-				UserId:           fromId,
-				PeerType:         peer.PeerType,
-				PeerId:           peer.PeerId,
-				PeerDialogId:     mtproto.MakePeerDialogId(mtproto.PEER_USER, peer.PeerId),
-				TopMessage:       outBoxMsgId,
-				UnreadCount:      0,
-				DraftMessageData: "null",
-				Date2:            int64(outMsgBox.Message.Date),
-			}
-
-			result.Data = outMsgBox
-		case mtproto.PEER_CHAT:
-			dialogDO = &dataobject.DialogsDO{
-				UserId:           fromId,
-				PeerType:         peer.PeerType,
-				PeerId:           peer.PeerId,
-				PeerDialogId:     mtproto.MakePeerDialogId(mtproto.PEER_CHAT, peer.PeerId),
-				TopMessage:       outBoxMsgId,
-				UnreadCount:      0,
-				DraftMessageData: "null",
-				Date2:            int64(outMsgBox.Message.Date),
-			}
-
-			result.Data = outMsgBox
-		default:
-			result.Err = fmt.Errorf("fatal error - invalid peer_type: %v", peer)
-			logx.WithContext(ctx).Errorf("%v", result)
 			return
 		}
 
 		for _, entity := range message.GetEntities() {
 			if entity.GetPredicateName() == mtproto.Predicate_messageEntityHashtag {
 				if entity.GetUrl() != "" {
-					d.HashTagsDAO.InsertOrUpdateTx(tx, &dataobject.HashTagsDO{
+					_, _, err = d.HashTagsDAO.InsertOrUpdateTx(tx, &dataobject.HashTagsDO{
 						UserId:           outMsgBox.UserId,
 						PeerType:         peer.PeerType,
 						PeerId:           peer.PeerId,
@@ -672,27 +630,23 @@ func (d *Dao) SendMessageToOutboxV1(ctx context.Context, fromId int64, peer *mtp
 		}
 	})
 
-	d.CachedConn.Exec(
+	_, err := d.DialogClient.DialogInsertOrUpdateDialog(
 		ctx,
-		func(ctx context.Context, conn *sqlx.DB) (int64, int64, error) {
-			rowsAffected, err := d.DialogsDAO.UpdateOutboxDialog(ctx,
-				dialogDO.TopMessage,
-				dialogDO.Date2,
-				fromId,
-				peer.PeerType,
-				peer.PeerId)
-			// log.Infof("rowsAffected = %d, %v", rowsAffected, dialogDO)
-			if err != nil {
-				return 0, 0, err
-			}
-			// again handle rowsAffected == 0
-			if rowsAffected == 0 {
-				_, _, err = d.DialogsDAO.InsertIgnore(ctx, dialogDO)
-			}
-
-			return 0, 0, err
-		},
-		dialog.GetDialogCacheKeyByPeer(fromId, peer.PeerType, peer.PeerId))
+		&dialog.TLDialogInsertOrUpdateDialog{
+			UserId:          fromId,
+			PeerType:        peer.PeerType,
+			PeerId:          peer.PeerId,
+			TopMessage:      &wrapperspb.Int32Value{Value: outBoxMsgId},
+			ReadOutboxMaxId: nil,
+			ReadInboxMaxId:  nil,
+			UnreadCount:     &wrapperspb.Int32Value{Value: 0},
+			UnreadMark:      false,
+			PinnedMsgId:     nil,
+			Date2:           &wrapperspb.Int64Value{Value: int64(outMsgBox.Message.Date)},
+		})
+	if err != nil {
+		// return i
+	}
 
 	return tR.Err
 }
@@ -723,6 +677,82 @@ func (d *Dao) sendMessageToOutboxV2(ctx context.Context, fromId int64, peer *mtp
 		pts = int32(idList[2].Id)
 
 		if dialogMessageId == 0 || outBoxMsgId == 0 || pts == 0 {
+			logx.WithContext(ctx).Errorf("GetNextIdList error: %v", idList)
+			err = mtproto.ErrInternalServerError
+			return nil, err
+		}
+	} else {
+		dialogMessageId = d.IDGenClient2.NextId(ctx)
+		if dialogMessageId == 0 {
+			err = mtproto.ErrInternalServerError
+			logx.WithContext(ctx).Errorf("NextId error: %v", dialogMessageId)
+			return nil, err
+
+		}
+	}
+
+	message.Out = out
+	message.Id = outBoxMsgId
+	message.MediaUnread = mtproto.CheckHasMediaUnread(message)
+	outMsgBox := mtproto.MakeTLMessageBox(&mtproto.MessageBox{
+		UserId:            fromId,
+		MessageId:         outBoxMsgId,
+		SenderUserId:      fromId,
+		PeerType:          peer.PeerType,
+		PeerId:            peer.PeerId,
+		RandomId:          outboxMessage.RandomId,
+		DialogId1:         dialogId.A,
+		DialogId2:         dialogId.B,
+		DialogMessageId:   dialogMessageId,
+		MessageFilterType: mtproto.GetMediaType(message),
+		Message:           message,
+		Mentioned:         false,
+		MediaUnread:       false,
+		Pinned:            false,
+		Pts:               pts,
+		PtsCount:          1,
+		Views:             0,
+		ReplyOwnerId:      0,
+		Forwards:          0,
+		Reaction:          "",
+		CommentGroupId:    0,
+		CommentGroupMsgId: 0,
+		ReplyToMsgId:      0,
+		ReplyToTopId:      0,
+		TtlPeriod:         0,
+		HasReaction:       false,
+	}).To_MessageBox()
+
+	return outMsgBox, nil
+}
+
+func (d *Dao) sendMessageToOutboxV3(ctx context.Context, fromId int64, peer *mtproto.PeerUtil, outboxMessage *msg.OutboxMessage, out bool) (*mtproto.MessageBox, error) {
+	var (
+		dialogId        = mtproto.MakeDialogId(fromId, peer.PeerType, peer.PeerId)
+		err             error
+		message         = outboxMessage.Message
+		outBoxMsgId     int32
+		dialogMessageId int64
+		pts             int32
+	)
+
+	if out {
+		idList := d.IDGenClient2.GetNextIdList(
+			ctx,
+			idgen_client.MakeIDTypeNextId(),
+			idgen_client.MakeIDTypeNgen(idgen_client.IDTypeMessageBox, fromId))
+		// idgen_client.MakeIDTypeNgen(idgen_client.IDTypePts, fromId))
+		if len(idList) != 2 {
+			err = mtproto.ErrInternalServerError
+			return nil, err
+		}
+
+		dialogMessageId = idList[0].Id
+		outBoxMsgId = int32(idList[1].Id)
+		// pts = int32(idList[2].Id)
+
+		// if dialogMessageId == 0 || outBoxMsgId == 0 || pts == 0 {
+		if dialogMessageId == 0 || outBoxMsgId == 0 {
 			logx.WithContext(ctx).Errorf("GetNextIdList error: %v", idList)
 			err = mtproto.ErrInternalServerError
 			return nil, err

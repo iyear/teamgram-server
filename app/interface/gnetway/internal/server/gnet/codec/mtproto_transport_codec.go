@@ -15,6 +15,7 @@ import (
 
 	"github.com/teamgram/proto/mtproto/crypto"
 
+	"github.com/valyala/bytebufferpool"
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
@@ -59,6 +60,26 @@ const (
 )
 
 var (
+	isClientType = false
+)
+
+const (
+	ERROR                       = -1
+	INVALID                     = 0
+	WAIT_FIRST_PACKET           = 1
+	WAIT_PACKET_LENGTH_1        = 2
+	WAIT_PACKET_LENGTH_1_PACKET = 3
+	WAIT_PACKET_LENGTH_3        = 4
+	WAIT_PACKET_LENGTH_3_PACKET = 5
+	WAIT_PACKET_LENGTH          = 6
+	WAIT_PACKET                 = 7
+)
+
+const (
+	MAX_MTPRORO_FRAME_SIZE = 16777216
+)
+
+var (
 	// ErrIncompletePacket occurs when there is an incomplete packet under TCP protocol.
 	ErrIncompletePacket = errors.New("incomplete packet")
 	// ErrInvalidFixedLength occurs when the output data have invalid fixed length.
@@ -78,11 +99,17 @@ var (
 )
 
 var (
-	isMTProto bool // 是否使用MTProto - true为官方mtproto协议，false为定制协议（当前实现为ntproto）
+	isMTProto    bool // 是否使用MTProto - true为官方mtproto协议，false为定制协议（当前实现为ntproto）
+	isObfuscated bool
+)
+
+var (
+	xBufPool = bytebufferpool.Pool{}
 )
 
 func init() {
 	flag.BoolVar(&isMTProto, "mtproto", true, "mtproto")
+	flag.BoolVar(&isObfuscated, "obfuscated", true, "obfuscated")
 }
 
 // var ErrShortBuffer = io.ErrShortBuffer
@@ -112,7 +139,7 @@ type CodecWriter interface {
 
 type Codec interface {
 	Encode(conn CodecWriter, msg interface{}) ([]byte, error)
-	Decode(conn CodecReader) (interface{}, error)
+	Decode(conn CodecReader) (bool, []byte, error)
 	// FirstBytes() int
 }
 
@@ -126,22 +153,26 @@ func CreateCodec(conn CodecReader) (Codec, error) {
 
 func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 	var (
-		firstByte uint8
-		err       error
-	)
-
-	bytes, _ := conn.Peek(1)
-	firstByte = bytes[0]
-
-	if firstByte == ABRIDGED_FLAG {
-		logx.Debugf("conn(%s) mtproto abridged version.", conn)
-		conn.Discard(1)
-		return newMTProtoAbridgedCodec(nil), nil
-	}
-
-	var (
+		err      error
+		bytes    []byte
 		firstInt uint32
 	)
+
+	if !isObfuscated {
+		var (
+			firstByte uint8
+		)
+		bytes, _ := conn.Peek(1)
+		firstByte = bytes[0]
+
+		if firstByte == ABRIDGED_FLAG {
+			tB, _ := conn.Peek(-1)
+			logx.Debugf("conn(%s) mtproto abridged version, data: %s", conn, hex.EncodeToString(tB))
+			_, _ = conn.Discard(1)
+			return newMTProtoAbridgedCodec(nil), nil
+		}
+	}
+
 	// not abridged version, we'll lookup codec!
 	bytes, err = conn.Peek(4)
 	if err != nil {
@@ -168,14 +199,14 @@ func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 	// check intermediate version
 	if firstInt == INTERMEDIATE_FLAG {
 		logx.Debugf("conn(%s) intermediate version.", conn)
-		conn.Discard(4)
+		_, _ = conn.Discard(4)
 		return newMTProtoIntermediateCodec(nil), nil
 	}
 
 	// check intermediate version
 	if firstInt == PADDED_INTERMEDIATE_FLAG {
 		logx.Debugf("conn(%s) padded intermediate version.", conn)
-		conn.Discard(4)
+		_, _ = conn.Discard(4)
 		return newMTProtoPaddedIntermediateCodec(nil), nil
 	}
 
@@ -271,7 +302,7 @@ func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 	//	c.remoteIp = ip.IntToIP(firstInt)
 	//}
 
-	conn.Discard(64)
+	_, _ = conn.Discard(64)
 
 	logx.Infof("conn(%s) mtproto obfuscated version, {protocol_type: %d, dc_id: %d}", conn, protocolType, dcId)
 	return newMTProtoObfuscatedCodec(d, e, protocolType, dcId), nil
@@ -342,7 +373,7 @@ func CreateMyProtoCodec(conn CodecReader) (Codec, error) {
 	dcId := int16(binary.BigEndian.Uint16(obfuscatedBuf[12:]))
 	// TODO: check dcId
 
-	conn.Discard(64)
+	_, _ = conn.Discard(64)
 
 	logx.Infof("conn(%s) mtproto obfuscated version, {protocol_type: %d, dc_id: %d}", conn, protocolType, dcId)
 	return newMTProtoObfuscatedCodec(d, e, protocolType, dcId), nil

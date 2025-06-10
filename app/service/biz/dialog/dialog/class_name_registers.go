@@ -2,7 +2,7 @@
  * WARNING! All changes made in this file will be lost!
  * Created from 'scheme.tl' by 'mtprotoc'
  *
- * Copyright (c) 2024-present,  Teamgram Authors.
+ * Copyright (c) 2025-present,  Teamgram Authors.
  *  All rights reserved.
  *
  * Author: Benqi (wubenqi@gmail.com)
@@ -32,8 +32,6 @@ const (
 	Predicate_dialog_reorderPinnedDialogs              = "dialog_reorderPinnedDialogs"
 	Predicate_dialog_getDialogById                     = "dialog_getDialogById"
 	Predicate_dialog_getTopMessage                     = "dialog_getTopMessage"
-	Predicate_dialog_updateReadInbox                   = "dialog_updateReadInbox"
-	Predicate_dialog_updateReadOutbox                  = "dialog_updateReadOutbox"
 	Predicate_dialog_insertOrUpdateDialog              = "dialog_insertOrUpdateDialog"
 	Predicate_dialog_deleteDialog                      = "dialog_deleteDialog"
 	Predicate_dialog_getUserPinnedMessage              = "dialog_getUserPinnedMessage"
@@ -56,6 +54,9 @@ const (
 	Predicate_dialog_getDialogFilterBySlug             = "dialog_getDialogFilterBySlug"
 	Predicate_dialog_createDialogFilter                = "dialog_createDialogFilter"
 	Predicate_dialog_updateUnreadCount                 = "dialog_updateUnreadCount"
+	Predicate_dialog_toggleDialogFilterTags            = "dialog_toggleDialogFilterTags"
+	Predicate_dialog_getDialogFilterTags               = "dialog_getDialogFilterTags"
+	Predicate_dialog_setChatWallpaper                  = "dialog_setChatWallpaper"
 )
 
 var clazzNameRegisters2 = map[string]map[int]int32{
@@ -64,7 +65,7 @@ var clazzNameRegisters2 = map[string]map[int]int32{
 
 	},
 	Predicate_dialogExt: {
-		0: -1109809056, // 0xbdd9a860
+		0: 1930144063, // 0x730ba93f
 
 	},
 	Predicate_dialogPinnedExt: {
@@ -143,16 +144,8 @@ var clazzNameRegisters2 = map[string]map[int]int32{
 		0: -92425614, // 0xfa7db272
 
 	},
-	Predicate_dialog_updateReadInbox: {
-		0: 489158840, // 0x1d27f8b8
-
-	},
-	Predicate_dialog_updateReadOutbox: {
-		0: 1483799934, // 0x5870fd7e
-
-	},
 	Predicate_dialog_insertOrUpdateDialog: {
-		0: 382601889, // 0x16ce0aa1
+		0: 1563133986, // 0x5d2b8822
 
 	},
 	Predicate_dialog_deleteDialog: {
@@ -239,11 +232,23 @@ var clazzNameRegisters2 = map[string]map[int]int32{
 		0: 732705613, // 0x2bac334d
 
 	},
+	Predicate_dialog_toggleDialogFilterTags: {
+		0: -1597149815, // 0xa0cd6d89
+
+	},
+	Predicate_dialog_getDialogFilterTags: {
+		0: -84870505, // 0xfaf0fa97
+
+	},
+	Predicate_dialog_setChatWallpaper: {
+		0: -1252926702, // 0xb551db12
+
+	},
 }
 
 var clazzIdNameRegisters2 = map[int32]string{
 	-155335502:  Predicate_updateDraftMessage,                       // 0xf6bdc4b2
-	-1109809056: Predicate_dialogExt,                                // 0xbdd9a860
+	1930144063:  Predicate_dialogExt,                                // 0x730ba93f
 	245834284:   Predicate_dialogPinnedExt,                          // 0xea7222c
 	-1496016642: Predicate_dialogFilterExt,                          // 0xa6d498fe
 	492418141:   Predicate_simpleDialogsData,                        // 0x1d59b45d
@@ -263,9 +268,7 @@ var clazzIdNameRegisters2 = map[int32]string{
 	-18664089:   Predicate_dialog_reorderPinnedDialogs,              // 0xfee33567
 	-1587594251: Predicate_dialog_getDialogById,                     // 0xa15f3bf5
 	-92425614:   Predicate_dialog_getTopMessage,                     // 0xfa7db272
-	489158840:   Predicate_dialog_updateReadInbox,                   // 0x1d27f8b8
-	1483799934:  Predicate_dialog_updateReadOutbox,                  // 0x5870fd7e
-	382601889:   Predicate_dialog_insertOrUpdateDialog,              // 0x16ce0aa1
+	1563133986:  Predicate_dialog_insertOrUpdateDialog,              // 0x5d2b8822
 	28515811:    Predicate_dialog_deleteDialog,                      // 0x1b31de3
 	-1885617487: Predicate_dialog_getUserPinnedMessage,              // 0x8f9bc2b1
 	371388970:   Predicate_dialog_updateUserPinnedMessage,           // 0x1622f22a
@@ -287,6 +290,9 @@ var clazzIdNameRegisters2 = map[int32]string{
 	1313177583:  Predicate_dialog_getDialogFilterBySlug,             // 0x4e457fef
 	-959749265:  Predicate_dialog_createDialogFilter,                // 0xc6cb636f
 	732705613:   Predicate_dialog_updateUnreadCount,                 // 0x2bac334d
+	-1597149815: Predicate_dialog_toggleDialogFilterTags,            // 0xa0cd6d89
+	-84870505:   Predicate_dialog_getDialogFilterTags,               // 0xfaf0fa97
+	-1252926702: Predicate_dialog_setChatWallpaper,                  // 0xb551db12
 
 }
 

@@ -19,15 +19,15 @@
 package core
 
 import (
-	"context"
 	"time"
 
-	"github.com/teamgram/marmota/pkg/stores/sqlx"
 	"github.com/teamgram/proto/mtproto"
 	"github.com/teamgram/teamgram-server/app/messenger/msg/inbox/inbox"
 	"github.com/teamgram/teamgram-server/app/messenger/msg/internal/dal/dataobject"
 	"github.com/teamgram/teamgram-server/app/messenger/sync/sync"
 	"github.com/teamgram/teamgram-server/app/service/biz/dialog/dialog"
+
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // InboxReadOutboxHistory
@@ -49,36 +49,41 @@ func (c *InboxCore) InboxReadOutboxHistory(in *inbox.TLInboxReadOutboxHistory) (
 		}
 		c.Logger.Infof("inbox.readOutboxHistory: %v", replyId)
 
-		c.svcCtx.Dao.CachedConn.Exec(
+		// TODO: check if the message is already read
+		_, _, err2 := c.svcCtx.Dao.MessageReadOutboxDAO.InsertOrUpdate(
 			c.ctx,
-			func(ctx context.Context, conn *sqlx.DB) (int64, int64, error) {
-				// TODO: check if the message is already read
-				_, _, err2 := c.svcCtx.Dao.MessageReadOutboxDAO.InsertOrUpdate(
-					c.ctx,
-					&dataobject.MessageReadOutboxDO{
-						UserId:            in.UserId,
-						PeerDialogId:      mtproto.MakePeerDialogId(in.PeerType, in.PeerId),
-						ReadUserId:        in.PeerId,
-						ReadOutboxMaxId:   replyId.UserMessageBoxId,
-						ReadOutboxMaxDate: time.Now().Unix(),
-					})
+			&dataobject.MessageReadOutboxDO{
+				UserId:            in.UserId,
+				PeerDialogId:      mtproto.MakePeerDialogId(in.PeerType, in.PeerId),
+				ReadUserId:        in.PeerId,
+				ReadOutboxMaxId:   replyId.UserMessageBoxId,
+				ReadOutboxMaxDate: time.Now().Unix(),
+			})
+		if err2 != nil {
+			c.Logger.Errorf("inbox.readOutboxHistory - error: %v", err2)
+			return nil, err2
+		}
 
-				_, err2 = c.svcCtx.Dao.DialogsDAO.UpdateReadOutboxMaxId(
-					c.ctx,
-					replyId.UserMessageBoxId,
-					in.UserId,
-					mtproto.MakePeerDialogId(in.PeerType, in.PeerId))
+		_, _ = c.svcCtx.Dao.DialogClient.DialogInsertOrUpdateDialog(
+			c.ctx,
+			&dialog.TLDialogInsertOrUpdateDialog{
+				UserId:          in.UserId,
+				PeerType:        in.PeerType,
+				PeerId:          in.PeerId,
+				TopMessage:      nil,
+				ReadOutboxMaxId: &wrapperspb.Int32Value{Value: replyId.UserMessageBoxId},
+				ReadInboxMaxId:  nil,
+				UnreadCount:     nil,
+				UnreadMark:      false,
+				PinnedMsgId:     nil,
+				Date2:           nil,
+			})
+		c.Logger.Infof("inbox.readOutboxHistory: (%d, %d, %d)",
+			replyId.UserMessageBoxId,
+			in.UserId,
+			mtproto.MakePeerDialogId(in.PeerType, in.PeerId))
 
-				c.Logger.Infof("inbox.readOutboxHistory: (%d, %d, %d)",
-					replyId.UserMessageBoxId,
-					in.UserId,
-					mtproto.MakePeerDialogId(in.PeerType, in.PeerId))
-
-				return 0, 0, err2
-			},
-			dialog.GetDialogCacheKey(in.UserId, mtproto.MakePeerDialogId(in.PeerType, in.PeerId)))
-
-		c.svcCtx.Dao.SyncClient.SyncPushUpdates(c.ctx, &sync.TLSyncPushUpdates{
+		_, _ = c.svcCtx.Dao.SyncClient.SyncPushUpdates(c.ctx, &sync.TLSyncPushUpdates{
 			UserId: in.UserId,
 			Updates: mtproto.MakeUpdatesByUpdates(mtproto.MakeTLUpdateReadHistoryOutbox(&mtproto.Update{
 				Peer_PEER: mtproto.MakePeerUser(in.PeerId),
@@ -102,31 +107,32 @@ func (c *InboxCore) InboxReadOutboxHistory(in *inbox.TLInboxReadOutboxHistory) (
 		}
 		c.Logger.Infof("inbox.readOutboxHistory: %v", replyId)
 
-		c.svcCtx.Dao.DialogsDAO.SelectPeerDialogListWithCB(
+		_, _ = c.svcCtx.Dao.DialogsDAO.SelectPeerDialogListWithCB(
 			c.ctx,
 			replyId.UserId,
 			[]int64{mtproto.MakePeerDialogId(in.PeerType, in.PeerId)},
 			func(sz, i int, v *dataobject.DialogsDO) {
 				if v.ReadOutboxMaxId < replyId.UserMessageBoxId {
-					c.svcCtx.Dao.CachedConn.Exec(
+					_, _ = c.svcCtx.Dao.DialogClient.DialogInsertOrUpdateDialog(
 						c.ctx,
-						func(ctx context.Context, conn *sqlx.DB) (int64, int64, error) {
-							_, err := c.svcCtx.Dao.DialogsDAO.UpdateReadOutboxMaxId(
-								c.ctx,
-								replyId.UserMessageBoxId,
-								replyId.UserId,
-								mtproto.MakePeerDialogId(in.PeerType, in.PeerId))
-							c.Logger.Infof("inbox.updateHistoryReaded: (%d, %d, %d)",
-								replyId.UserMessageBoxId,
-								replyId.PeerId,
-								mtproto.MakePeerDialogId(in.PeerType, in.PeerId))
+						&dialog.TLDialogInsertOrUpdateDialog{
+							UserId:          replyId.UserId,
+							PeerType:        in.PeerType,
+							PeerId:          in.PeerId,
+							TopMessage:      nil,
+							ReadOutboxMaxId: &wrapperspb.Int32Value{Value: replyId.UserMessageBoxId},
+							ReadInboxMaxId:  nil,
+							UnreadCount:     nil,
+							UnreadMark:      false,
+							PinnedMsgId:     nil,
+							Date2:           nil,
+						})
+					c.Logger.Infof("inbox.updateHistoryReaded: (%d, %d, %d)",
+						replyId.UserMessageBoxId,
+						replyId.PeerId,
+						mtproto.MakePeerDialogId(in.PeerType, in.PeerId))
 
-							return 0, 0, err
-						},
-						dialog.GetDialogCacheKey(replyId.UserId, mtproto.MakePeerDialogId(in.PeerType, in.PeerId)))
-
-					// topMessage := c.svcCtx.Dao.DialogsDAO.Select
-					c.svcCtx.Dao.SyncClient.SyncPushUpdates(c.ctx, &sync.TLSyncPushUpdates{
+					_, _ = c.svcCtx.Dao.SyncClient.SyncPushUpdates(c.ctx, &sync.TLSyncPushUpdates{
 						UserId: in.UserId,
 						Updates: mtproto.MakeUpdatesByUpdates(mtproto.MakeTLUpdateReadHistoryOutbox(&mtproto.Update{
 							Peer_PEER: mtproto.MakePeerChat(in.PeerId),

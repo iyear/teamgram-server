@@ -128,8 +128,9 @@ func makeEmojiStatus(documentId int64, until int32) *mtproto.EmojiStatus {
 		}).To_EmojiStatus()
 	} else {
 		return mtproto.MakeTLEmojiStatusUntil(&mtproto.EmojiStatus{
-			DocumentId: documentId,
-			Until:      until,
+			DocumentId:      documentId,
+			Until_INT32:     until,
+			Until_FLAGINT32: mtproto.MakeFlagsInt32(until),
 		}).To_EmojiStatus()
 	}
 }
@@ -170,12 +171,13 @@ func (d *Dao) MakeUserDataByDO(userDO *dataobject.UsersDO) *mtproto.UserData {
 		PrivaciesVersion:   1,
 		Premium:            userDO.Premium,
 		EmojiStatus:        makeEmojiStatus(userDO.EmojiStatusDocumentId, userDO.EmojiStatusUntil),
-		StoriesUnavailable: false,
+		StoriesUnavailable: true,
 		StoriesMaxId:       userDO.StoriesMaxId,
 		Color:              makePeerColor(userDO.Color, userDO.ColorBackgroundEmojiId),
 		ProfileColor:       makePeerColor(userDO.ProfileColor, userDO.ProfileColorBackgroundEmojiId),
 		Birthday:           userDO.Birthday,
 		PersonalChannelId:  userDO.PersonalChannelId,
+		PremiumExpireDate:  mtproto.MakeFlagsInt64(userDO.PremiumExpireDate),
 	}).To_UserData()
 
 	return userData
@@ -197,12 +199,13 @@ func (d *Dao) GetNoCacheUserData(ctx context.Context, id int64) (*CacheUserData,
 
 	userData := d.MakeUserDataByDO(do)
 	if do.Restricted {
-		jsonx.UnmarshalFromString(do.RestrictionReason, &userData.RestrictionReason)
+		_ = jsonx.UnmarshalFromString(do.RestrictionReason, &userData.RestrictionReason)
 	}
 	cacheData.UserData = userData
 
 	if do.UserType == user.UserTypeUnknown ||
-		do.UserType == user.UserTypeDeleted {
+		do.UserType == user.UserTypeDeleted ||
+		do.Deleted {
 		return cacheData, nil
 	}
 
@@ -279,7 +282,7 @@ func (d *Dao) GetCacheUserDataListByIdList(ctx context.Context, idList []int64) 
 		keyList = append(keyList, genCacheUserDataCacheKey(id))
 	}
 
-	d.CachedConn.QueryRows(
+	_ = d.CachedConn.QueryRows(
 		ctx,
 		func(ctx context.Context, conn *sqlx.DB, keys ...string) (map[string]interface{}, error) {
 			vList := make(map[string]interface{}, len(keys))

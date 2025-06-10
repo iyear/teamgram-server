@@ -24,8 +24,9 @@ import (
 
 	"github.com/teamgram/proto/mtproto"
 	"github.com/teamgram/teamgram-server/app/bff/authorization/internal/dao"
-	"github.com/teamgram/teamgram-server/app/bff/authorization/internal/model"
+	"github.com/teamgram/teamgram-server/app/bff/authorization/model"
 	"github.com/teamgram/teamgram-server/pkg/code"
+
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
@@ -72,7 +73,7 @@ func (m *AuthLogic) DoAuthSendCode(
 	}
 
 	// TODO(@benqi): after sendSms success, save codeData
-	m.Dao.UpdatePhoneCodeData(ctx, authKeyId, phoneNumber, codeData.PhoneCodeHash, codeData)
+	_ = m.Dao.UpdatePhoneCodeData(ctx, authKeyId, phoneNumber, codeData.PhoneCodeHash, codeData)
 
 	//if codeData.State == model.CodeStateSend {
 	//	//switch codeData.State {

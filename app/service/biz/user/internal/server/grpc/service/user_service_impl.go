@@ -2,7 +2,7 @@
  * WARNING! All changes made in this file will be lost!
  * Created from 'scheme.tl' by 'mtprotoc'
  *
- * Copyright 2024 Teamgram Authors.
+ * Copyright 2025 Teamgram Authors.
  *  All rights reserved.
  *
  * Author: teamgramio (teamgram.io@gmail.com)
@@ -379,7 +379,7 @@ func (s *Service) UserCreateNewUser(ctx context.Context, request *user.TLUserCre
 }
 
 // UserDeleteUser
-// user.deleteUser user_id:long reason:string = Bool;
+// user.deleteUser user_id:long reason:string phone:string = Bool;
 func (s *Service) UserDeleteUser(ctx context.Context, request *user.TLUserDeleteUser) (*mtproto.Bool, error) {
 	c := core.New(ctx, s.svcCtx)
 	c.Logger.Debugf("user.deleteUser - metadata: {%s}, request: {%s}", c.MD, request)
@@ -949,7 +949,7 @@ func (s *Service) UserSearch(ctx context.Context, request *user.TLUserSearch) (*
 }
 
 // UserUpdateBotData
-// user.updateBotData flags:# bot_id:long bot_chat_history:flags.15?Bool bot_nochats:flags.16?Bool bot_inline_geo:flags.21?Bool bot_attach_menu:flags.27?Bool bot_inline_placeholder:flags.19?Bool = Bool;
+// user.updateBotData flags:# bot_id:long bot_chat_history:flags.15?Bool bot_nochats:flags.16?Bool bot_inline_geo:flags.21?Bool bot_attach_menu:flags.27?Bool bot_inline_placeholder:flags.19?string = Bool;
 func (s *Service) UserUpdateBotData(ctx context.Context, request *user.TLUserUpdateBotData) (*mtproto.Bool, error) {
 	c := core.New(ctx, s.svcCtx)
 	c.Logger.Debugf("user.updateBotData - metadata: {%s}, request: {%s}", c.MD, request)
@@ -1125,5 +1125,65 @@ func (s *Service) UserGetUserIdByPhone(ctx context.Context, request *user.TLUser
 	}
 
 	c.Logger.Debugf("user.getUserIdByPhone - reply: {%s}", r)
+	return r, err
+}
+
+// UserSetAuthorizationTTL
+// user.setAuthorizationTTL user_id:long ttl:int = Bool;
+func (s *Service) UserSetAuthorizationTTL(ctx context.Context, request *user.TLUserSetAuthorizationTTL) (*mtproto.Bool, error) {
+	c := core.New(ctx, s.svcCtx)
+	c.Logger.Debugf("user.setAuthorizationTTL - metadata: {%s}, request: {%s}", c.MD, request)
+
+	r, err := c.UserSetAuthorizationTTL(request)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debugf("user.setAuthorizationTTL - reply: {%s}", r)
+	return r, err
+}
+
+// UserGetAuthorizationTTL
+// user.getAuthorizationTTL user_id:long = AccountDaysTTL;
+func (s *Service) UserGetAuthorizationTTL(ctx context.Context, request *user.TLUserGetAuthorizationTTL) (*mtproto.AccountDaysTTL, error) {
+	c := core.New(ctx, s.svcCtx)
+	c.Logger.Debugf("user.getAuthorizationTTL - metadata: {%s}, request: {%s}", c.MD, request)
+
+	r, err := c.UserGetAuthorizationTTL(request)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debugf("user.getAuthorizationTTL - reply: {%s}", r)
+	return r, err
+}
+
+// UserUpdatePremium
+// user.updatePremium flags:# user_id:long premium:Bool months:flags.1?int = Bool;
+func (s *Service) UserUpdatePremium(ctx context.Context, request *user.TLUserUpdatePremium) (*mtproto.Bool, error) {
+	c := core.New(ctx, s.svcCtx)
+	c.Logger.Debugf("user.updatePremium - metadata: {%s}, request: {%s}", c.MD, request)
+
+	r, err := c.UserUpdatePremium(request)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debugf("user.updatePremium - reply: {%s}", r)
+	return r, err
+}
+
+// UserGetBotInfoV2
+// user.getBotInfoV2 bot_id:long = BotInfoData;
+func (s *Service) UserGetBotInfoV2(ctx context.Context, request *user.TLUserGetBotInfoV2) (*user.BotInfoData, error) {
+	c := core.New(ctx, s.svcCtx)
+	c.Logger.Debugf("user.getBotInfoV2 - metadata: {%s}, request: {%s}", c.MD, request)
+
+	r, err := c.UserGetBotInfoV2(request)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Logger.Debugf("user.getBotInfoV2 - reply: {%s}", r)
 	return r, err
 }

@@ -21,7 +21,7 @@ package core
 import (
 	"github.com/teamgram/proto/mtproto"
 	"github.com/teamgram/teamgram-server/app/bff/authorization/internal/logic"
-	"github.com/teamgram/teamgram-server/app/bff/authorization/internal/model"
+	"github.com/teamgram/teamgram-server/app/bff/authorization/model"
 )
 
 /*
@@ -55,7 +55,7 @@ func (c *AuthorizationCore) AuthResendCode(in *mtproto.TLAuthResendCode) (*mtpro
 
 	// 3. check number
 	// client phone number format: "+86 111 1111 1111"
-	phoneNumber, err := checkPhoneNumberInvalid(in.PhoneNumber)
+	_, phoneNumber, err := checkPhoneNumberInvalid(in.PhoneNumber)
 	if err != nil {
 		c.Logger.Errorf("check phone_number(%s) error - %v", in.PhoneNumber, err)
 		err = mtproto.ErrPhoneNumberInvalid

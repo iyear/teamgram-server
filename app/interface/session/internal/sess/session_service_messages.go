@@ -76,7 +76,7 @@ func (c *session) onNewSessionCreated(ctx context.Context, gatewayId string, msg
 
 	logx.WithContext(ctx).Infof("onNewSessionCreated - reply: {%v}", newSessionCreated)
 
-	c.sendDirectToGateway(ctx, gatewayId, true, newSessionCreated, func(sentRaw *mtproto.TLMessageRawData) {
+	_, _ = c.sendDirectToGateway(ctx, gatewayId, true, newSessionCreated, func(sentRaw *mtproto.TLMessageRawData) {
 		id2 := c.sessList.cb.getNextNotifyId()
 		sentMsg := c.outQueue.AddNotifyMsg(id2, true, sentRaw)
 		sentMsg.sent = 0
@@ -164,7 +164,8 @@ func (c *session) onPingDelayDisconnect(ctx context.Context, gatewayId string, m
 	c.sendRawToQueue(ctx, gatewayId, msgId.msgId, false, pong)
 	msgId.state = RECEIVED | NEED_NO_ACK
 
-	willCloseDate := time.Now().Unix() + int64(pingDelayDisconnect.DisconnectDelay) + kPingAddTimeout
+	// willCloseDate := time.Now().Unix() + int64(pingDelayDisconnect.DisconnectDelay) + kPingAddTimeout
+	willCloseDate := time.Now().Unix() + kDefaultPingTimeout + kPingAddTimeout
 	if willCloseDate > c.closeDate {
 		c.closeDate = willCloseDate
 	}

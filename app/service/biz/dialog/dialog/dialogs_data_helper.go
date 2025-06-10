@@ -37,7 +37,7 @@ func (m *DialogsDataHelper) fix() {
 		p := mtproto.FromPeer(dlg.Peer)
 		for _, msg := range m.Messages {
 			to := mtproto.FromPeer(msg.PeerId)
-			if to.PeerType == p.PeerType && dlg.TopMessage == msg.Id {
+			if to.PeerType == p.PeerType && to.PeerId == p.PeerId && dlg.TopMessage == msg.Id {
 				topMessage = msg
 				break
 			}
@@ -49,11 +49,11 @@ func (m *DialogsDataHelper) fix() {
 			case mtproto.PEER_USER:
 				for _, v := range m.Users {
 					if v.Id == p.PeerId {
-						if v.Deleted {
-							topMessage = nil
-						} else {
-							users = append(users, v)
-						}
+						//if v.Deleted {
+						//	topMessage = nil
+						//} else {
+						users = append(users, v)
+						//}
 						found = true
 						break
 					}
@@ -62,11 +62,11 @@ func (m *DialogsDataHelper) fix() {
 				for _, v := range m.Chats {
 					if v.Id == p.PeerId {
 						// TODO: check chatEmpty/chatForbidden
-						if v.Deactivated || v.Left {
-							topMessage = nil
-						} else {
-							chats = append(chats, v)
-						}
+						//if v.Deactivated || v.Left {
+						//	topMessage = nil
+						//} else {
+						chats = append(chats, v)
+						//}
 						found = true
 						break
 					}
@@ -75,11 +75,11 @@ func (m *DialogsDataHelper) fix() {
 				for _, v := range m.Chats {
 					if v.Id == p.PeerId {
 						// TODO: check channelForbidden
-						if v.Left {
-							topMessage = nil
-						} else {
-							chats = append(chats, v)
-						}
+						//if v.Left {
+						//	topMessage = nil
+						//} else {
+						chats = append(chats, v)
+						//}
 						found = true
 						break
 					}
@@ -113,7 +113,7 @@ func (m *DialogsDataHelper) ToMessagesDialogs(count int32) *mtproto.Messages_Dia
 }
 
 func (m *DialogsDataHelper) ToMessagesPeerDialogs(state *mtproto.Updates_State) *mtproto.Messages_PeerDialogs {
-	m.fix()
+	// m.fix()
 	return mtproto.MakeTLMessagesPeerDialogs(&mtproto.Messages_PeerDialogs{
 		Dialogs:  m.Dialogs,
 		Messages: m.Messages,

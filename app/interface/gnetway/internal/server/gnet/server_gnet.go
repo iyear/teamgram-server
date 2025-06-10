@@ -34,11 +34,12 @@ import (
 	"github.com/gobwas/ws/wsutil"
 	"github.com/panjf2000/gnet/v2"
 	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/timex"
 	"google.golang.org/protobuf/proto"
 )
 
 func (s *Server) asyncRun(connId int64, execb func() error, retcb func(c gnet.Conn)) {
-	s.pool.Submit(func() {
+	_ = s.pool.Submit(func() {
 		if err := execb(); err == nil {
 			s.eng.Trigger(connId, func(c gnet.Conn) {
 				retcb(c)
@@ -51,13 +52,15 @@ func (s *Server) asyncRun(connId int64, execb func() error, retcb func(c gnet.Co
 
 func (s *Server) asyncRun2(
 	connId int64,
-	mmsg *mtproto.MTPRawMessage,
-	execb func(mmsg *mtproto.MTPRawMessage) (interface{}, error),
-	retcb func(c gnet.Conn, mmsg *mtproto.MTPRawMessage, in interface{}, err error)) {
-	s.pool.Submit(func() {
-		r, err := execb(mmsg)
+	kId int64,
+	needAck bool,
+	mmsg []byte,
+	execb func(kId int64, mmsg []byte) (interface{}, error),
+	retcb func(c gnet.Conn, needAck bool, mmsg []byte, in interface{}, err error)) {
+	_ = s.pool.Submit(func() {
+		r, err := execb(kId, mmsg)
 		s.eng.Trigger(connId, func(c gnet.Conn) {
-			retcb(c, mmsg, r, err)
+			retcb(c, needAck, mmsg, r, err)
 		})
 	})
 }
@@ -123,8 +126,8 @@ func (s *Server) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 		return
 	}
 
-	s.pool.Submit(func() {
-		s.svcCtx.ShardingSessionClient.InvokeByKey(
+	_ = s.pool.Submit(func() {
+		_ = s.svcCtx.ShardingSessionClient.InvokeByKey(
 			strconv.FormatInt(ctx.authKey.PermAuthKeyId(), 10),
 			func(client sessionclient.SessionClient) (err error) {
 				_, err = client.SessionCloseSession(context.Background(), &session.TLSessionCloseSession{
@@ -137,6 +140,9 @@ func (s *Server) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 						ClientIp:      ctx.clientIp,
 					}).To_SessionClientEvent(),
 				})
+				if err != nil {
+					logx.Errorf("client.SessionCloseSession - error: %v", err)
+				}
 				return
 			})
 	})
@@ -171,17 +177,19 @@ func (s *Server) OnTick() (delay time.Duration, action gnet.Action) {
 			return
 		}
 		if now >= ctx.closeDate {
-			logx.Debugf("close conn(%s) by timeout", c)
-			c.Close()
+			logx.Errorf("close conn(%s) by timeout", c)
+			_ = c.Close()
 		}
 	})
 	return
 }
 
-func (s *Server) onEncryptedMessage(c gnet.Conn, ctx *connContext, authKey *authKeyUtil, mmsg *mtproto.MTPRawMessage) error {
-	mtpRwaData, err := authKey.AesIgeDecrypt(mmsg.Payload[8:8+16], mmsg.Payload[24:])
+func (s *Server) onEncryptedMessage(c gnet.Conn, ctx *connContext, authKey *authKeyUtil, needAck bool, mmsg []byte) error {
+	since := timex.Now()
+
+	mtpRwaData, err := authKey.AesIgeDecrypt(mmsg[8:8+16], mmsg[24:])
 	if err != nil {
-		logx.Errorf("conn(%s) decrypt data(%d) error: {%v}, payload: %s", c, len(mmsg.Payload)-24, err, hex.EncodeToString(mmsg.Payload))
+		logx.Errorf("conn(%s) decrypt data(%d) error: {%v}, payload: %s", c, len(mmsg)-24, err, hex.EncodeToString(mmsg))
 		return err
 	}
 
@@ -218,7 +226,7 @@ func (s *Server) onEncryptedMessage(c gnet.Conn, ctx *connContext, authKey *auth
 				x2.Long(authKey.AuthKeyId())
 				x2.Bytes(msgKey)
 				x2.Bytes(mtpRawData)
-				UnThreadSafeWrite(c, &mtproto.MTPRawMessage{Payload: x2.GetBuf()})
+				_ = UnThreadSafeWrite(c, &mtproto.MTPRawMessage{Payload: x2.GetBuf()})
 
 				return nil
 			default:
@@ -243,8 +251,12 @@ func (s *Server) onEncryptedMessage(c gnet.Conn, ctx *connContext, authKey *auth
 		// check sessionId??
 	}
 
-	s.pool.Submit(func() {
-		s.svcCtx.Dao.ShardingSessionClient.InvokeByKey(
+	_ = s.pool.Submit(func() {
+		defer func() {
+			logx.WithDuration(timex.Since(since)).Infof("onEncryptedMessage: %s", c)
+		}()
+
+		_ = s.svcCtx.Dao.ShardingSessionClient.InvokeByKey(
 			strconv.FormatInt(permAuthKeyId, 10),
 			func(client sessionclient.SessionClient) (err error) {
 				if isNew {
@@ -259,6 +271,9 @@ func (s *Server) onEncryptedMessage(c gnet.Conn, ctx *connContext, authKey *auth
 								ClientIp:      clientIp,
 							}).To_SessionClientEvent(),
 						})
+						if err != nil {
+							logx.Errorf("client.SessionCreateSession - error: %v", err)
+						}
 					}
 				}
 
@@ -289,87 +304,98 @@ func (s *Server) GetConnCounts() int {
 	return s.eng.CountConnections()
 }
 
-func (s *Server) onMTPRawMessage(ctx *connContext, c gnet.Conn, msg2 *mtproto.MTPRawMessage) (action gnet.Action) {
-	if msg2.AuthKeyId() == 0 {
+func (s *Server) onMTPRawMessage(ctx *connContext, c gnet.Conn, authKeyId int64, needAck bool, msg2 []byte) (action gnet.Action) {
+	if authKeyId == 0 {
 		out, err := s.onHandshake(c, msg2)
 		if err != nil {
+			logx.Errorf("conn(%s) onHandshake - error: %v", c, err)
 			action = gnet.Close
 		} else if out != nil {
-			UnThreadSafeWrite(c, out)
+			_ = UnThreadSafeWrite(c, out)
 		}
 	} else {
 		authKey := ctx.getAuthKey()
 		if authKey == nil {
-			key := s.GetAuthKey(msg2.AuthKeyId())
+			key := s.GetAuthKey(authKeyId)
 			if key != nil {
 				authKey = newAuthKeyUtil(key)
 				ctx.putAuthKey(authKey)
 			}
-		} else if authKey.AuthKeyId() != msg2.AuthKeyId() {
+		} else if authKey.AuthKeyId() != authKeyId {
 			//
+			logx.Errorf("conn(%s) getAuthKey - error: invalid key id %d ", c, authKeyId)
 			action = gnet.Close
 			return
 		}
 
 		if authKey != nil {
-			err := s.onEncryptedMessage(c, ctx, authKey, msg2)
+			err := s.onEncryptedMessage(c, ctx, authKey, needAck, msg2)
 			if err != nil {
+				logx.Errorf("conn(%s) onEncryptedMessage - error: %v ", c, err)
 				action = gnet.Close
 			}
-			return
-		}
-		if len(msg2.Payload) > 32 {
-			logx.Debugf("conn(%s) data: %s", c, hex.EncodeToString(msg2.Payload[:32]))
-		}
+		} else {
+			if len(msg2) > 32 {
+				logx.Debugf("conn(%s) data: %s", c, hex.EncodeToString(msg2[:32]))
+			}
 
-		s.asyncRun2(
-			c.ConnId(),
-			msg2.Clone(),
-			func(mmsg *mtproto.MTPRawMessage) (interface{}, error) {
-				var (
-					key3 *mtproto.AuthKeyInfo
-				)
+			msg2Clone := make([]byte, len(msg2))
+			copy(msg2Clone, msg2)
 
-				err2 := s.svcCtx.Dao.ShardingSessionClient.InvokeByKey(
-					strconv.FormatInt(mmsg.AuthKeyId(), 10),
-					func(client sessionclient.SessionClient) (err error) {
-						key3, err = client.SessionQueryAuthKey(context.Background(), &session.TLSessionQueryAuthKey{
-							AuthKeyId: mmsg.AuthKeyId(),
+			s.asyncRun2(
+				c.ConnId(),
+				authKeyId,
+				needAck,
+				msg2Clone,
+				func(authKeyId2 int64, mmsg []byte) (interface{}, error) {
+					var (
+						key3 *mtproto.AuthKeyInfo
+					)
+
+					err2 := s.svcCtx.Dao.ShardingSessionClient.InvokeByKey(
+						strconv.FormatInt(authKeyId2, 10),
+						func(client sessionclient.SessionClient) (err error) {
+							key3, err = client.SessionQueryAuthKey(context.Background(), &session.TLSessionQueryAuthKey{
+								AuthKeyId: authKeyId2,
+							})
+							return
 						})
-						return
-					})
-				if err2 != nil {
-					logx.Errorf("conn(%s) sessionQueryAuthKey error: %v", c, err2)
-					return nil, err2
-				} else {
-					s.PutAuthKey(key3)
-				}
+					if err2 != nil {
+						logx.Errorf("conn(%s) sessionQueryAuthKey - error: %v", c, err2)
+						return nil, err2
+					} else {
+						s.PutAuthKey(key3)
+					}
 
-				return newAuthKeyUtil(key3), nil
-			},
-			func(c2 gnet.Conn, mmsg *mtproto.MTPRawMessage, in interface{}, err error) {
-				if err != nil {
-					if errors.Is(err, mtproto.ErrAuthKeyUnregistered) {
-						out2 := &mtproto.MTPRawMessage{
-							Payload: make([]byte, 4),
-						}
-						var (
-							code = int32(-404)
-						)
-						binary.LittleEndian.PutUint32(out2.Payload, uint32(code))
-						UnThreadSafeWrite(c2, out2)
-					}
-					c2.Close()
-				} else {
-					authKey2 := in.(*authKeyUtil)
-					ctx2 := c2.Context().(*connContext)
-					ctx2.putAuthKey(authKey2)
-					err = s.onEncryptedMessage(c2, ctx2, authKey2, mmsg)
+					return newAuthKeyUtil(key3), nil
+				},
+				func(c2 gnet.Conn, needAck2 bool, mmsg []byte, in interface{}, err error) {
 					if err != nil {
-						c2.Close()
+						if errors.Is(err, mtproto.ErrAuthKeyUnregistered) {
+							out2 := &mtproto.MTPRawMessage{
+								Payload: make([]byte, 4),
+							}
+							var (
+								code = int32(-404)
+							)
+							binary.LittleEndian.PutUint32(out2.Payload, uint32(code))
+							_ = UnThreadSafeWrite(c2, out2)
+						}
+
+						logx.Errorf("conn(%s) sessionQueryAuthKey - error: %v", c2, err)
+						_ = c2.Close()
+					} else {
+						authKey2 := in.(*authKeyUtil)
+						ctx2 := c2.Context().(*connContext)
+						ctx2.putAuthKey(authKey2)
+						err = s.onEncryptedMessage(c2, ctx2, authKey2, needAck2, mmsg)
+						if err != nil {
+							logx.Errorf("conn(%s) onEncryptedMessage - error: %v ", c2, err)
+							_ = c2.Close()
+						}
 					}
-				}
-			})
+				})
+		}
 	}
 
 	return gnet.None
@@ -379,15 +405,18 @@ func UnThreadSafeWrite(c gnet.Conn, msg interface{}) error {
 	ctx := c.Context().(*connContext)
 
 	if ctx.codec == nil {
+		logx.Errorf("conn(%s) c.Write(data) - error: ctx.codec == nil ", c)
 		return nil
 	}
 
 	if msg == nil {
+		logx.Errorf("conn(%s) c.Write(data) - error: msg == ni ", c)
 		return nil
 	}
 
 	data, err := ctx.codec.Encode(c, msg)
 	if err != nil {
+		logx.Errorf("conn(%s) ctx.codec.Encode(c, msg) - error: %v ", c, err)
 		return err
 	}
 
@@ -395,11 +424,14 @@ func UnThreadSafeWrite(c gnet.Conn, msg interface{}) error {
 		// This is the echo server
 		err = wsutil.WriteServerBinary(c, data)
 		if err != nil {
-			logx.Infof("conn[%v] [err=%v]", c.RemoteAddr().String(), err.Error())
+			logx.Errorf("conn[%v] [err=%v]", c.RemoteAddr().String(), err.Error())
 			return err
 		}
 	} else {
 		_, err = c.Write(data)
+		if err != nil {
+			logx.Errorf("conn(%s) c.Write(data) - error: %v ", c, err)
+		}
 	}
 
 	return nil

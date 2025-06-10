@@ -10,7 +10,7 @@ Open source [mtproto](https://core.telegram.org/mtproto) server implementation w
   - Intermediate
   - Padded intermediate
   - Full
-- API Layer: 190
+- API Layer: 201
 - private chat
 - basic group
 - contacts
@@ -33,6 +33,7 @@ Privatization deployment Before `Teamgram`, please make sure that the above five
 
 - [Centos9 Stream Build and Install](docs/install-centos-9.md) [@A Feel]
 - [CentOS7 teamgram-server环境搭建](docs/install-centos-7.md) [@saeipi]
+- [Fedora 40 Build and Install](docs/install-fedora.md) [@lingyicute]
 
 If you have the above components, it is recommended to use them directly. If not, it is recommended to use `docker-compose-env.yaml`.
 
@@ -82,6 +83,14 @@ cd teamgram-server
 		mysql -uroot teamgram < teamgramd/sql/migrate-20240420.sql
 		mysql -uroot teamgram < teamgramd/sql/migrate-20240620.sql
 		mysql -uroot teamgram < teamgramd/sql/migrate-20240828.sql
+		mysql -uroot teamgram < teamgramd/sql/migrate-20241010.sql
+		mysql -uroot teamgram < teamgramd/sql/migrate-20241016.sql
+		mysql -uroot teamgram < teamgramd/sql/migrate-20241026.sql
+		mysql -uroot teamgram < teamgramd/sql/migrate-20241105.sql
+		mysql -uroot teamgram < teamgramd/sql/migrate-20241123.sql
+		mysql -uroot teamgram < teamgramd/sql/migrate-20250109.sql
+		mysql -uroot teamgram < teamgramd/sql/migrate-20250410.sql
+		mysql -uroot teamgram < teamgramd/sql/migrate-20250529.sql
 		mysql -uroot teamgram < teamgramd/sql/z_init.sql
 	```
 

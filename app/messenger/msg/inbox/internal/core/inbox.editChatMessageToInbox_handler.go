@@ -10,13 +10,13 @@
 package core
 
 import (
-	"google.golang.org/protobuf/proto"
-
 	"github.com/teamgram/proto/mtproto"
 	"github.com/teamgram/teamgram-server/app/messenger/msg/inbox/inbox"
 	"github.com/teamgram/teamgram-server/app/messenger/sync/sync"
 	chatpb "github.com/teamgram/teamgram-server/app/service/biz/chat/chat"
 	userpb "github.com/teamgram/teamgram-server/app/service/biz/user/user"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // InboxEditChatMessageToInbox
@@ -73,7 +73,7 @@ func (c *InboxCore) InboxEditChatMessageToInbox(in *inbox.TLInboxEditChatMessage
 				Message_MESSAGE: inBox.Message,
 			}).To_Update())
 
-		c.svcCtx.Dao.SyncClient.SyncPushUpdates(c.ctx, &sync.TLSyncPushUpdates{
+		_, _ = c.svcCtx.Dao.SyncClient.SyncPushUpdates(c.ctx, &sync.TLSyncPushUpdates{
 			UserId:  toId,
 			Updates: pushUpdates,
 		})
