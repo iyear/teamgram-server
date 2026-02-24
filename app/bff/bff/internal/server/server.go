@@ -37,6 +37,7 @@ import (
 	miscellaneous_helper "github.com/teamgram/teamgram-server/app/bff/miscellaneous"
 	notification_helper "github.com/teamgram/teamgram-server/app/bff/notification"
 	nsfw_helper "github.com/teamgram/teamgram-server/app/bff/nsfw"
+	passkeyhelper "github.com/teamgram/teamgram-server/app/bff/passkey"
 	passport_helper "github.com/teamgram/teamgram-server/app/bff/passport"
 	premium_helper "github.com/teamgram/teamgram-server/app/bff/premium"
 	privacysettingshelper "github.com/teamgram/teamgram-server/app/bff/privacysettings"
@@ -45,8 +46,8 @@ import (
 	sponsoredmessages_helper "github.com/teamgram/teamgram-server/app/bff/sponsoredmessages"
 	tos_helper "github.com/teamgram/teamgram-server/app/bff/tos"
 	updates_helper "github.com/teamgram/teamgram-server/app/bff/updates"
+	userchannelprofileshelper "github.com/teamgram/teamgram-server/app/bff/userchannelprofiles"
 	usernames_helper "github.com/teamgram/teamgram-server/app/bff/usernames"
-	userprofilehelper "github.com/teamgram/teamgram-server/app/bff/userprofile"
 	users_helper "github.com/teamgram/teamgram-server/app/bff/users"
 
 	"github.com/zeromicro/go-zero/core/conf"
@@ -124,7 +125,6 @@ func (s *Server) Initialize() error {
 					MsgClient:                 c.MsgClient,
 					SignInMessage:             c.SignInMessage,
 					SignInServiceNotification: c.SignInServiceNotification,
-					UsernameClient:            c.BizServiceClient,
 				},
 				nil,
 				nil))
@@ -198,11 +198,10 @@ func (s *Server) Initialize() error {
 			grpcServer,
 			contacts_helper.New(
 				contacts_helper.Config{
-					RpcServerConf:  c.RpcServerConf,
-					UserClient:     c.BizServiceClient,
-					ChatClient:     c.BizServiceClient,
-					UsernameClient: c.BizServiceClient,
-					SyncClient:     c.SyncClient,
+					RpcServerConf: c.RpcServerConf,
+					UserClient:    c.BizServiceClient,
+					ChatClient:    c.BizServiceClient,
+					SyncClient:    c.SyncClient,
 				},
 				nil))
 
@@ -241,16 +240,15 @@ func (s *Server) Initialize() error {
 		mtproto.RegisterRPCMessagesServer(
 			grpcServer,
 			messages_helper.New(messages_helper.Config{
-				RpcServerConf:  c.RpcServerConf,
-				UserClient:     c.BizServiceClient,
-				ChatClient:     c.BizServiceClient,
-				MsgClient:      c.MsgClient,
-				DialogClient:   c.BizServiceClient,
-				IdgenClient:    c.IdgenClient,
-				MessageClient:  c.BizServiceClient,
-				MediaClient:    c.MediaClient,
-				UsernameClient: c.BizServiceClient,
-				SyncClient:     c.SyncClient,
+				RpcServerConf: c.RpcServerConf,
+				UserClient:    c.BizServiceClient,
+				ChatClient:    c.BizServiceClient,
+				MsgClient:     c.MsgClient,
+				DialogClient:  c.BizServiceClient,
+				IdgenClient:   c.IdgenClient,
+				MessageClient: c.BizServiceClient,
+				MediaClient:   c.MediaClient,
+				SyncClient:    c.SyncClient,
 			}, nil))
 
 		// notification_helper
@@ -303,7 +301,6 @@ func (s *Server) Initialize() error {
 					AuthsessionClient: c.AuthSessionClient,
 					ChatClient:        c.BizServiceClient,
 					SyncClient:        c.SyncClient,
-					UsernameClient:    c.BizServiceClient,
 				},
 				nil,
 				nil))
@@ -311,11 +308,10 @@ func (s *Server) Initialize() error {
 		mtproto.RegisterRPCUsernamesServer(
 			grpcServer,
 			usernames_helper.New(usernames_helper.Config{
-				RpcServerConf:  c.RpcServerConf,
-				UserClient:     c.BizServiceClient,
-				UsernameClient: c.BizServiceClient,
-				ChatClient:     c.BizServiceClient,
-				SyncClient:     c.SyncClient,
+				RpcServerConf: c.RpcServerConf,
+				UserClient:    c.BizServiceClient,
+				ChatClient:    c.BizServiceClient,
+				SyncClient:    c.SyncClient,
 			}, nil))
 
 		// privacysettingshelper
@@ -342,14 +338,20 @@ func (s *Server) Initialize() error {
 				MessageClient: c.BizServiceClient,
 			}))
 
-		// userprofilehelper
-		mtproto.RegisterRPCUserProfileServer(
+		// userchannelprofileshelper
+		mtproto.RegisterRPCUserChannelProfilesServer(
 			grpcServer,
-			userprofilehelper.New(userprofilehelper.Config{
+			userchannelprofileshelper.New(userchannelprofileshelper.Config{
 				RpcServerConf: c.RpcServerConf,
 				MediaClient:   c.MediaClient,
 				UserClient:    c.BizServiceClient,
 				SyncClient:    c.SyncClient,
+			}))
+
+		mtproto.RegisterRPCPasskeyServer(
+			grpcServer,
+			passkeyhelper.New(passkeyhelper.Config{
+				RpcServerConf: c.RpcServerConf,
 			}))
 	})
 

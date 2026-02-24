@@ -128,6 +128,10 @@ func Open(filename string) (image.Image, error) {
 	return imaging.Open(filename)
 }
 
+func Save(img image.Image, filename string) (err error) {
+	return imaging.Save(img, filename)
+}
+
 func Decode(r io.Reader, opts ...imaging.DecodeOption) (image.Image, error) {
 	return imaging.Decode(r, opts...)
 }
@@ -138,6 +142,10 @@ func Resize(img image.Image, width, height int) *image.NRGBA {
 
 func EncodeJpeg(w io.Writer, img image.Image) error {
 	return imaging.Encode(w, img, imaging.JPEG)
+}
+
+func EncodePng(w io.Writer, img image.Image) error {
+	return imaging.Encode(w, img, imaging.PNG)
 }
 
 func Fill(img image.Image, width, height int) *image.NRGBA {

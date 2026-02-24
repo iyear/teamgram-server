@@ -53,13 +53,20 @@ var (
 	EncodeWebp = imaging.EncodeWebp
 
 	Open       = imaging.Open
+	Save       = imaging.Save
 	Decode     = imaging.Decode
 	Resize     = imaging.Resize
 	EncodeJpeg = imaging.EncodeJpeg
+	EncodePng  = imaging.EncodePng
 
 	EncodeStripped = imaging.EncodeStripped
 
+	ReSizeImage        = imaging.ReSizeImage
+	ReSizeImageByImage = imaging.ReSizeImageByImage
+
 	MustNewMinioClient = minio_util.MustNewMinioClient
+
+	GetStorageFileTypeConstructor = model.GetStorageFileTypeConstructor
 )
 
 func init() {

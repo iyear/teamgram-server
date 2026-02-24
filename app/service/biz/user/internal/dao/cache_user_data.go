@@ -121,13 +121,8 @@ func (d *Dao) GetCacheUserData(ctx context.Context, id int64) *CacheUserData {
 func makeEmojiStatus(documentId int64, until int32) *mtproto.EmojiStatus {
 	if documentId == 0 {
 		return nil
-	}
-	if until > 0 {
-		return mtproto.MakeTLEmojiStatus(&mtproto.EmojiStatus{
-			DocumentId: documentId,
-		}).To_EmojiStatus()
 	} else {
-		return mtproto.MakeTLEmojiStatusUntil(&mtproto.EmojiStatus{
+		return mtproto.MakeTLEmojiStatus(&mtproto.EmojiStatus{
 			DocumentId:      documentId,
 			Until_INT32:     until,
 			Until_FLAGINT32: mtproto.MakeFlagsInt32(until),
@@ -141,9 +136,47 @@ func makePeerColor(color int32, backgroundEmojiId int64) *mtproto.PeerColor {
 	}
 
 	return mtproto.MakeTLPeerColor(&mtproto.PeerColor{
-		Color:             mtproto.MakeFlagsInt32(color),
-		BackgroundEmojiId: mtproto.MakeFlagsInt64(backgroundEmojiId),
+		Color:                       mtproto.MakeFlagsInt32(color),
+		BackgroundEmojiId_FLAGINT64: mtproto.MakeFlagsInt64(backgroundEmojiId),
 	}).To_PeerColor()
+}
+
+func getUsernames(usernames string) []*mtproto.Username {
+	if usernames == "" {
+		return nil
+	} else if usernames[0] != '[' {
+		return nil
+	} else {
+		var (
+			usernameList []*mtproto.Username
+		)
+
+		_ = jsonx.UnmarshalFromString(usernames, &usernameList)
+		if len(usernameList) <= 1 {
+			return nil
+		} else {
+			return usernameList
+		}
+	}
+}
+
+func getUsername(usernames string) string {
+	if usernames == "" {
+		return ""
+	} else if usernames[0] != '[' {
+		return usernames
+	} else {
+		var (
+			usernameList []*mtproto.Username
+		)
+
+		_ = jsonx.UnmarshalFromString(usernames, &usernameList)
+		if len(usernameList) == 1 {
+			return usernameList[0].GetUsername()
+		} else {
+			return ""
+		}
+	}
 }
 
 func (d *Dao) MakeUserDataByDO(userDO *dataobject.UsersDO) *mtproto.UserData {
@@ -178,6 +211,9 @@ func (d *Dao) MakeUserDataByDO(userDO *dataobject.UsersDO) *mtproto.UserData {
 		Birthday:           userDO.Birthday,
 		PersonalChannelId:  userDO.PersonalChannelId,
 		PremiumExpireDate:  mtproto.MakeFlagsInt64(userDO.PremiumExpireDate),
+		SavedMusic:         nil,
+		MainTab:            mtproto.ToProfileTabByType(userDO.MainTab),
+		Usernames:          nil,
 	}).To_UserData()
 
 	return userData
@@ -234,6 +270,11 @@ func (d *Dao) GetNoCacheUserData(ctx context.Context, id int64) (*CacheUserData,
 					PhotoId: do.PhotoId,
 				})
 			}
+			if do.SavedMusicId != 0 {
+				userData.SavedMusic, _ = d.MediaGetDocument(ctx, &media.TLMediaGetDocument{
+					Id: do.SavedMusicId,
+				})
+			}
 		},
 		func() {
 			cacheData.ContactIdList, _ = d.UserContactsDAO.SelectUserContactIdList(ctx, id)
@@ -252,6 +293,17 @@ func (d *Dao) GetNoCacheUserData(ctx context.Context, id int64) (*CacheUserData,
 		},
 		func() {
 			rules2, _ = d.GetUserPrivacyRules(ctx, id, mtproto.PHONE_NUMBER)
+		},
+		func() {
+			if do.Username != "" {
+				_, _ = d.UsernameDAO.SelectListByUserIdWithCB(ctx, id, func(sz, i int, v *dataobject.UsernameDO) {
+					cacheData.UserData.Usernames = append(cacheData.UserData.Usernames, mtproto.MakeTLUsername(&mtproto.Username{
+						Editable: v.Editable,
+						Active:   v.Active,
+						Username: v.Username,
+					}).To_Username())
+				})
+			}
 		})
 
 	if rules0 != nil {

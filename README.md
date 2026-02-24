@@ -1,169 +1,144 @@
-# Teamgram - Unofficial open source [mtproto](https://core.telegram.org/mtproto) server written in golang
-> open source mtproto server implemented in golang with compatible telegram client.
+# Teamgram Server
 
-## Introduce
-Open source [mtproto](https://core.telegram.org/mtproto) server implementation written in golang, support private deployment.
+[中文](README-zh.md) | **English**
+
+---
+
+Unofficial open-source [MTProto](https://core.telegram.org/mtproto) server implementation in Go. Compatible with Telegram clients; supports self-hosted deployment.
 
 ## Features
-- MTProto 2.0
-  - Abridged
-  - Intermediate
-  - Padded intermediate
-  - Full
-- API Layer: 201
-- private chat
-- basic group
-- contacts
-- web
+
+- **MTProto 2.0**
+  - **Abridged**
+  - **Intermediate**
+  - **Padded intermediate**
+  - **Full**
+- **API Layer: 222**
+- **Core features**
+  - **private chat**
+  - **basic group**
+  - **contacts**
+  - **web**
 
 ## Architecture
+
 ![Architecture](docs/image/architecture-001.png)
 
-## Installing Teamgram 
-`Teamgram` relies on high-performance components: 
+- [Architecture Docs](https://deepwiki.com/teamgram/teamgram-server) - `DeepWiki` teamgram/teamgram-server
+- [Architecture (specs)](specs/architecture.md) — service topology, data flow, and ports  
+- [Service topology and configuration](docs/service-topology.md) — ports, infrastructure dependencies, call graph, and Mermaid diagram ([中文](docs/service-topology-zh.md))
 
-- **mysql5.7**
-- [redis](https://redis.io/)
-- [etcd](https://etcd.io/)
-- [kafka](https://kafka.apache.org/quickstart)
-- [minio](https://docs.min.io/docs/minio-quickstart-guide.html#GNU/Linux)
-- [ffmpeg](https://www.johnvansickle.com/ffmpeg/)
+## Prerequisites
 
-Privatization deployment Before `Teamgram`, please make sure that the above five components have been installed. If your server does not have the above components, you must first install Missing components. 
+| Component | Purpose |
+|-----------|---------|
+| [MySQL](https://www.mysql.com/) 5.7+ / 8.0 | Primary data store |
+| [Redis](https://redis.io/) | Cache, session, deduplication |
+| [etcd](https://etcd.io/) | Service discovery & config |
+| [Kafka](https://kafka.apache.org/) | Message & event pipeline |
+| [MinIO](https://minio.io/) | Object storage |
+| [FFmpeg](https://ffmpeg.org/) | Media transcoding (on server) |
 
-- [Centos9 Stream Build and Install](docs/install-centos-9.md) [@A Feel]
-- [CentOS7 teamgram-server环境搭建](docs/install-centos-7.md) [@saeipi]
-- [Fedora 40 Build and Install](docs/install-fedora.md) [@lingyicute]
+Detailed versions and optional monitoring stack: [Dependencies and runtime (specs)](specs/dependencies-and-runtime.md).
 
-If you have the above components, it is recommended to use them directly. If not, it is recommended to use `docker-compose-env.yaml`.
+---
 
+## Manual installation
 
-### Source code deployment
-#### Install [Go environment](https://go.dev/doc/install). Make sure Go version is at least 1.21.
+For running the server from source (Go build), follow the step-by-step guides:
 
+- **[Manual installation (Linux)](docs/install-manual-linux.md)** — CentOS, Fedora, Ubuntu/Debian
+- **[Manual installation (macOS)](docs/install-manual-macos.md)** — Intel and Apple Silicon
 
-#### Get source code　
+Requires Go 1.21+. You must install and configure dependencies (MySQL, Redis, etcd, Kafka, MinIO, FFmpeg), initialize the database and MinIO, then build and run.
 
-```
+---
+
+## Docker installation
+
+For running the full stack with Docker. **No manual data initialization:** the dependency stack initializes the database (via mounted SQL) and MinIO buckets (via `minio-mc`) on first start.
+
+### 1. Clone
+
+```bash
 git clone https://github.com/teamgram/teamgram-server.git
 cd teamgram-server
 ```
 
-#### Init data
-- init database
+### 2. Start dependency stack
 
-	```
-	1. create database teamgram
-	2. init teamgram database
-		mysql -uroot teamgram < teamgramd/sql/1_teamgram.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220321.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220326.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220328.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220401.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220412.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220419.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220423.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220504.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220721.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220826.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20220919.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20221008.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20221011.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20221016.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20221023.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20221101.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20221127.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20230707.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240107.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240108.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240111.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240112.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240113.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240114.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240420.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240620.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20240828.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20241010.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20241016.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20241026.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20241105.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20241123.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20250109.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20250410.sql
-		mysql -uroot teamgram < teamgramd/sql/migrate-20250529.sql
-		mysql -uroot teamgram < teamgramd/sql/z_init.sql
-	```
+This starts MySQL, Redis, etcd, Kafka, MinIO (and optional monitoring). The database and MinIO buckets are initialized automatically.
 
-- init minio buckets
-	- bucket names
-	  - `documents`
-	  - `encryptedfiles`
-	  - `photos`
-	  - `videos`
-	- Access `http://ip:xxxxx` and create
-
-
-#### Build
-	
-```
-make
+```bash
+docker compose -f docker-compose-env.yaml up -d
 ```
 
-#### Run
+### 3. Start application
 
-```
-cd teamgramd/bin
-./runall2.sh
-```
-
-### Docker deployment
-#### Install [Docker](https://docs.docker.com/get-docker/)
-
-#### Install [Docker Compose](https://docs.docker.com/compose/install/)
-
-#### Get source code
-
-```
-git clone https://github.com/teamgram/teamgram-server.git
-cd teamgram-server
+```bash
+docker compose up -d
 ```
 
-#### Run
+---
 
-```  
-# run dependency
-docker-compose -f ./docker-compose-env.yaml up -d
+## Logging, monitoring & tracing
 
-# run docker-compose
-docker-compose up -d
-```
-	
+| Area | Brief | Detailed docs |
+|------|--------|----------------|
+| **Log** | [Filebeat](https://www.elastic.co/beats/filebeat) → Kafka (`teamgram-log`) → [go-stash](https://github.com/kevwan/go-stash) → Elasticsearch → Kibana. Config: `teamgramd/deploy/filebeat/conf/filebeat.yml`, `teamgramd/deploy/go-stash/etc/`. | [Log collection](docs/log-collection.md) ([中文](docs/log-collection-zh.md)) |
+| **Monitor** | [Prometheus](https://prometheus.io/) scrapes metrics; [Grafana](https://grafana.com/) for dashboards. Enable via `Prometheus` block in `teamgramd/etc2/*.yaml`. Config: `teamgramd/deploy/prometheus/server/prometheus.yml`. | [Service monitoring](docs/service-monitoring.md) ([中文](docs/service-monitoring-zh.md)) |
+| **Tracing** | go-zero [Jaeger](https://www.jaegertracing.io/) / Zipkin support. Set `Telemetry` in `teamgramd/etc2/*.yaml`. Jaeger is included in `docker-compose-env.yaml`. | [Link tracking](docs/link-tracking.md) ([中文](docs/link-tracking-zh.md)) |
+
+---
+
 ## Compatible clients
-**Important**: default signIn verify code is **12345**
 
-[Android client for Teamgram](clients/teamgram-android.md)
+**Default sign-in verification code:** `12345` (change for production.)
 
-[iOS client for Teamgram](clients/teamgram-ios.md)
+| Platform | Repository | Patch Link |
+|----------|------------|------------|
+| Android | [https://github.com/teamgram/teamgram-android](https://github.com/teamgram/teamgram-android) | [teamgram-android](clients/teamgram-android.md) |
+| iOS | [https://github.com/teamgram/teamgram-ios](https://github.com/teamgram/teamgram-ios) | [teamgram-ios](clients/teamgram-ios.md) |
+| Desktop (TDesktop) | [https://github.com/teamgram/teamgram-tdesktop](https://github.com/teamgram/teamgram-tdesktop) | [teamgram-tdesktop](clients/teamgram-tdesktop.md) |
 
-[tdesktop for Teamgram](clients/teamgram-tdesktop.md)
+---
 
-## Feedback
-Please report bugs, concerns, suggestions by issues, or join telegram group **[Teamgram](https://t.me/+TjD5LZJ5XLRlCYLF)** to discuss problems around source code.
+## Documentation
 
-## Notes
-If need enterprise edition:
+- [Project specs](specs/README.md) — Architecture, protocol, dependencies, contributing, security, roadmap
+- [Service topology and configuration](docs/service-topology.md) — Ports, infrastructure, call graph ([中文](docs/service-topology-zh.md))
+- [CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md) · [CHANGELOG](CHANGELOG.md)
 
-- sticker/theme/wallpaper/reactions/2fa/sms/push(apns/web/fcm)/secretchat/scheduled/...
-- channel/megagroup
-- audiocall/videocall/groupcall
+
+---
+
+## Community & feedback
+
+- **Issues:** bugs and feature requests
+- **Telegram:** [Teamgram group](https://t.me/+TjD5LZJ5XLRlCYLF)
+
+---
+
+## Enterprise edition
+
+The following are available in the enterprise edition (contact the [author](https://t.me/benqi)):
+
+- sticker/theme/chat_theme/wallpaper/reactions/secretchat/2fa/sms/push(apns/web/fcm)/web/scheduled/autodelete/... 
+- channels/megagroups
+- audio/video/group/conferenceCall
 - bots
+- miniapp
 
-please PM the **[author](https://t.me/benqi)**
+See [specs/roadmap.md](specs/roadmap.md) for community vs. enterprise scope.
+
+---
+
+## License
+
+[Apache License 2.0](LICENSE).
+
+---
 
 ## Give a Star! ⭐
 
-If you like or are using this project to learn or start your solution, please give it a star. Thanks!
-
-## Visitors Count
-
-<img align="left" src = "https://profile-counter.glitch.me/teamgram-server/count.svg" alt="Loading" />
+If this project helps you, consider giving it a star.

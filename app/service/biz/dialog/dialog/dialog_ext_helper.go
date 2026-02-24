@@ -181,6 +181,7 @@ func (m DialogExtList) DoGetMessagesDialogs(
 
 			for _, dialogExt := range m {
 				peer2 := mtproto.FromPeer(dialogExt.Dialog.Peer)
+				idHelper.PickByPeer(dialogExt.Dialog.Peer)
 				if peer2.IsChannel() {
 					chIdList = append(chIdList, TopMessageId{Peer: peer2, TopMessage: dialogExt.Dialog.TopMessage})
 				} else {

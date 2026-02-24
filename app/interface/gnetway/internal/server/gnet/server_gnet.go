@@ -16,6 +16,7 @@
 package gnet
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"github.com/teamgram/proto/mtproto"
+	"github.com/teamgram/teamgram-server/app/interface/gnetway/internal/server/gnet/pp"
 	"github.com/teamgram/teamgram-server/app/interface/gnetway/internal/server/gnet/ws"
 	"github.com/teamgram/teamgram-server/app/interface/session/client"
 	"github.com/teamgram/teamgram-server/app/interface/session/session"
@@ -37,6 +39,18 @@ import (
 	"github.com/zeromicro/go-zero/core/timex"
 	"google.golang.org/protobuf/proto"
 )
+
+func (s *Server) asyncRunIfError(connId int64, msgId int64, execb func() error, retcb func(c gnet.Conn, msgId int64, err error)) {
+	_ = s.pool.Submit(func() {
+		if err := execb(); err != nil {
+			s.eng.Trigger(connId, func(c gnet.Conn) {
+				retcb(c, msgId, err)
+			})
+		} else {
+			// do nothing
+		}
+	})
+}
 
 func (s *Server) asyncRun(connId int64, execb func() error, retcb func(c gnet.Conn)) {
 	_ = s.pool.Submit(func() {
@@ -87,6 +101,7 @@ func (s *Server) OnOpen(c gnet.Conn) (out []byte, action gnet.Action) {
 
 	ctx := newConnContext()
 	ctx.setClientIp(strings.Split(c.RemoteAddr().String(), ":")[0])
+	ctx.ppv1 = s.c.Gnetway.IsProxyProtocolV1(c.LocalAddr().String())
 	ctx.tcp = s.c.Gnetway.IsTcp(c.LocalAddr().String())
 	ctx.websocket = s.c.Gnetway.IsWebsocket(c.LocalAddr().String())
 	if ctx.websocket {
@@ -154,6 +169,42 @@ func (s *Server) OnClose(c gnet.Conn, err error) (action gnet.Action) {
 func (s *Server) OnTraffic(c gnet.Conn) (action gnet.Action) {
 	ctx := c.Context().(*connContext)
 	ctx.closeDate = time.Now().Unix() + 300 + rand.Int63()%10
+	if ctx.ppv1 {
+		ppv1, err := c.Peek(-1)
+		if err != nil {
+			logx.Errorf("conn(%s) Peek fail: %v", c, err)
+			return
+		}
+		if len(ppv1) < len(pp.V1Identifier) {
+			logx.Errorf("conn(%s) ppv1 < len(pp.V1Identifier), data: %s", c, hex.EncodeToString(ppv1))
+			return
+		}
+
+		if bytes.HasPrefix(ppv1, pp.V1Identifier) {
+			logx.Errorf("conn(%s) ppv1 data: %s", c, hex.EncodeToString(ppv1))
+
+			r := bytes.NewReader(ppv1)
+			h, err := pp.ReadHeader(r)
+			if err != nil {
+				logx.Errorf("conn(%s) ReadHeader error: %v", c, err)
+				if r.Len() > 107 {
+					return gnet.Close
+				} else {
+					return
+				}
+			}
+			ctx.setClientIp(strings.Split(h.Source.String(), ":")[0])
+			_, _ = c.Discard(len(ppv1) - r.Len())
+			ctx.ppv1 = false
+
+			if r.Len() == 0 {
+				return
+			}
+		} else {
+			ctx.ppv1 = false
+		}
+	}
+
 	if ctx.websocket {
 		return s.onWebsocketData(ctx, c)
 	} else {
@@ -194,9 +245,11 @@ func (s *Server) onEncryptedMessage(c gnet.Conn, ctx *connContext, authKey *auth
 	}
 
 	var (
-		permAuthKeyId = authKey.PermAuthKeyId()
-		salt          = int64(binary.LittleEndian.Uint64(mtpRwaData))
-		sessionId     = int64(binary.LittleEndian.Uint64(mtpRwaData[8:]))
+		permAuthKeyId     = authKey.PermAuthKeyId()
+		salt              = int64(binary.LittleEndian.Uint64(mtpRwaData))
+		sessionId         = int64(binary.LittleEndian.Uint64(mtpRwaData[8:]))
+		msgId             = int64(binary.LittleEndian.Uint64(mtpRwaData[16:24]))
+		isBindTempAuthKey = false
 	)
 
 	if permAuthKeyId == 0 {
@@ -210,6 +263,7 @@ func (s *Server) onEncryptedMessage(c gnet.Conn, ctx *connContext, authKey *auth
 				clone.PermAuthKeyId = permAuthKeyId
 				authKey.keyData = clone
 				s.PutAuthKey(clone)
+				isBindTempAuthKey = true
 			case *mtproto.TLPing:
 				payload := serializeToBuffer2(salt, sessionId, &mtproto.TLMessage2{
 					MsgId: nextMessageId(false),
@@ -251,51 +305,76 @@ func (s *Server) onEncryptedMessage(c gnet.Conn, ctx *connContext, authKey *auth
 		// check sessionId??
 	}
 
-	_ = s.pool.Submit(func() {
-		defer func() {
-			logx.WithDuration(timex.Since(since)).Infof("onEncryptedMessage: %s", c)
-		}()
+	s.asyncRunIfError(
+		c.ConnId(),
+		msgId,
+		func() error {
+			defer func() {
+				logx.WithDuration(timex.Since(since)).Infof("onEncryptedMessage: %s", c)
+			}()
 
-		_ = s.svcCtx.Dao.ShardingSessionClient.InvokeByKey(
-			strconv.FormatInt(permAuthKeyId, 10),
-			func(client sessionclient.SessionClient) (err error) {
-				if isNew {
-					if s.authSessionMgr.AddNewSession(authKey, sessionId, connId) {
-						_, err = client.SessionCreateSession(context.Background(), &session.TLSessionCreateSession{
-							Client: session.MakeTLSessionClientEvent(&session.SessionClientEvent{
-								ServerId:      s.svcCtx.GatewayId,
-								AuthKeyId:     authKey.AuthKeyId(),
-								KeyType:       int32(authKey.AuthKeyType()),
-								PermAuthKeyId: permAuthKeyId,
-								SessionId:     sessionId,
-								ClientIp:      clientIp,
-							}).To_SessionClientEvent(),
-						})
-						if err != nil {
-							logx.Errorf("client.SessionCreateSession - error: %v", err)
+			return s.svcCtx.Dao.ShardingSessionClient.InvokeByKey(
+				strconv.FormatInt(permAuthKeyId, 10),
+				func(client sessionclient.SessionClient) (err error) {
+					if isNew {
+						if s.authSessionMgr.AddNewSession(authKey, sessionId, connId) {
+							_, err = client.SessionCreateSession(context.Background(), &session.TLSessionCreateSession{
+								Client: session.MakeTLSessionClientEvent(&session.SessionClientEvent{
+									ServerId:      s.svcCtx.GatewayId,
+									AuthKeyId:     authKey.AuthKeyId(),
+									KeyType:       int32(authKey.AuthKeyType()),
+									PermAuthKeyId: permAuthKeyId,
+									SessionId:     sessionId,
+									ClientIp:      clientIp,
+								}).To_SessionClientEvent(),
+							})
+							if err != nil {
+								logx.Errorf("client.SessionCreateSession - error: %v", err)
+							}
 						}
 					}
-				}
 
-				_, err = client.SessionSendDataToSession(context.Background(), &session.TLSessionSendDataToSession{
-					Data: &session.SessionClientData{
-						ServerId:      s.svcCtx.GatewayId,
-						AuthKeyId:     authKey.AuthKeyId(),
-						KeyType:       int32(authKey.AuthKeyType()),
-						PermAuthKeyId: permAuthKeyId,
-						SessionId:     sessionId,
-						Salt:          salt,
-						Payload:       mtpRwaData[16:],
-						ClientIp:      clientIp,
-					},
+					_, err = client.SessionSendDataToSession(context.Background(), &session.TLSessionSendDataToSession{
+						Data: &session.SessionClientData{
+							ServerId:      s.svcCtx.GatewayId,
+							AuthKeyId:     authKey.AuthKeyId(),
+							KeyType:       int32(authKey.AuthKeyType()),
+							PermAuthKeyId: permAuthKeyId,
+							SessionId:     sessionId,
+							Salt:          salt,
+							Payload:       mtpRwaData[16:],
+							ClientIp:      clientIp,
+						},
+					})
+					if err != nil {
+						logx.Errorf("session.sendDataToSession - error: %v", err)
+					}
+
+					return
 				})
-				if err != nil {
-					logx.Errorf("session.sendDataToSession - error: %v", err)
-				}
+		},
+		func(c gnet.Conn, msgId int64, err error) {
+			if isBindTempAuthKey && errors.Is(err, mtproto.ErrAuthKeyUnregistered) {
+				payload := serializeToBuffer2(salt, sessionId, &mtproto.TLMessage2{
+					MsgId: nextMessageId(false),
+					Seqno: 0,
+					Bytes: 0,
+					Object: &mtproto.TLRpcResult{
+						ReqMsgId: msgId,
+						Result: mtproto.MakeTLRpcError(&mtproto.RpcError{
+							ErrorCode:    400,
+							ErrorMessage: "ENCRYPTED_MESSAGE_INVALID",
+						}).To_RpcError(),
+					}})
 
-				return
-			})
-	})
+				msgKey, mtpRawData, _ := authKey.AesIgeEncrypt(payload)
+				x2 := mtproto.NewEncodeBuf(8 + len(msgKey) + len(mtpRawData))
+				x2.Long(authKey.AuthKeyId())
+				x2.Bytes(msgKey)
+				x2.Bytes(mtpRawData)
+				_ = UnThreadSafeWrite(c, &mtproto.MTPRawMessage{Payload: x2.GetBuf()})
+			}
+		})
 
 	return nil
 }

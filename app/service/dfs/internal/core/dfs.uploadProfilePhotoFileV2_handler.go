@@ -39,7 +39,30 @@ func (c *DfsCore) DfsUploadProfilePhotoFileV2(in *dfs.TLDfsUploadProfilePhotoFil
 		photoV2 *mtproto.Photo
 	)
 
+	// TODO: file and video not nil
 	if in.GetFile() != nil {
+		file = in.GetVideo()
+		if file != nil {
+			if err = model.CheckFileParts(file.Parts); err != nil {
+				c.Logger.Errorf("dfs.uploadPhotoFile - %v", err)
+				return nil, err
+			}
+
+			photoV2, err = c.uploadVideoSizeListV2(in.GetCreator(), file, in.GetVideoStartTs().GetValue())
+		} else {
+			file = in.GetFile()
+			if err = model.CheckFileParts(file.Parts); err != nil {
+				c.Logger.Errorf("dfs.uploadPhotoFile - %v", err)
+				return nil, err
+			}
+
+			photoV2, err = c.uploadPhotoSizeListV2(in.GetCreator(), in.GetFile(), true)
+		}
+		if err != nil {
+			c.Logger.Errorf("dfs.uploadPhotoFile - %v", err)
+			return nil, err
+		}
+	} else {
 		file = in.GetFile()
 		//if file == nil {
 		//	c.Logger.Errorf("dfs.uploadPhotoFile - ErrInputRequestInvalid")
@@ -52,19 +75,6 @@ func (c *DfsCore) DfsUploadProfilePhotoFileV2(in *dfs.TLDfsUploadProfilePhotoFil
 		}
 
 		photoV2, err = c.uploadPhotoSizeListV2(in.GetCreator(), in.GetFile(), true)
-		if err != nil {
-			c.Logger.Errorf("dfs.uploadPhotoFile - %v", err)
-			return nil, err
-		}
-	} else {
-		file = in.GetVideo()
-
-		if err = model.CheckFileParts(file.Parts); err != nil {
-			c.Logger.Errorf("dfs.uploadPhotoFile - %v", err)
-			return nil, err
-		}
-
-		photoV2, err = c.uploadVideoSizeListV2(in.GetCreator(), file, in.GetVideoStartTs().GetValue())
 		if err != nil {
 			c.Logger.Errorf("dfs.uploadPhotoFile - %v", err)
 			return nil, err

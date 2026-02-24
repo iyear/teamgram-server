@@ -5,15 +5,28 @@ Etcd:
     - 127.0.0.1:2379
   Key: service.dfs
 Timeout: 0
+Log:
+  ServiceName: service.dfs
+  Mode: file
+  Path: ../logs/dfs
+  Level: debug
+##监控
+#Prometheus:
+#  Host: 0.0.0.0
+#  Port: 20641
+#  Path: /metrics
+##链路追踪
+#Telemetry:
+#  Name: service.dfs
+#  Endpoint: http://127.0.0.1:14268/api/traces
+#  Sampler: 1.0
+#  Batcher: jaeger
+
 MiniHttp:
   Name: service.dfs.minihttp
   Host: 0.0.0.0
   Port: 11701
   Timeout: 0
-  Log:
-    Mode: file
-    Path: ../logs/dfs
-    Level: debug
 Cache:
   - Host: 127.0.0.1:6379
 Minio:
@@ -21,6 +34,11 @@ Minio:
   AccessKeyID: minio
   SecretAccessKey: miniostorage
   UseSSL: false
+  Bucket:
+    Documents: documents
+    Photos: photos
+    Videos: videos
+    EncryptedFiles: encryptedfiles
 IdGen:
   Etcd:
     Hosts:
