@@ -18,7 +18,8 @@ import (
 )
 
 func SerializeToBuffer2(salt, sessionId int64, msg2 *mtproto.TLMessageRawData) []byte {
-	x := mtproto.NewEncodeBuf(32 + len(msg2.Body))
+	x := mtproto.GetEncodeBuf()
+	defer mtproto.PutEncodeBuf(x)
 
 	x.Long(salt)
 	x.Long(sessionId)
@@ -27,16 +28,25 @@ func SerializeToBuffer2(salt, sessionId int64, msg2 *mtproto.TLMessageRawData) [
 	x.Int(msg2.Bytes)
 	x.Bytes(msg2.Body)
 
-	return x.GetBuf()
+	buf := append([]byte(nil), x.GetBuf()...)
+	return buf
 }
 
 func (d *Dao) watchGateway(c zrpc.RpcClientConf) {
-	sub, _ := discov.NewSubscriber(c.Etcd.Hosts, c.Etcd.Key)
+	sub, err := discov.NewSubscriber(c.Etcd.Hosts, c.Etcd.Key)
+	if err != nil {
+		logx.Errorf("watchGateway NewSubscriber(%+v) error: %v", c.Etcd, err)
+		return
+	}
+
 	update := func() {
 		values := sub.Values()
 		if len(values) == 0 {
 			return
 		}
+
+		d.gateMu.Lock()
+		defer d.gateMu.Unlock()
 
 		clients := map[string]*Gateway{}
 		for _, v := range values {
@@ -45,11 +55,10 @@ func (d *Dao) watchGateway(c zrpc.RpcClientConf) {
 				continue
 			}
 			c.Endpoints = []string{v}
-			// cli, err := zrpc.NewClient(c)
 			cli, err := NewGateway(c)
 			if err != nil {
-				logx.Error("watchComet NewClient(%+v) error(%v)", values, err)
-				return
+				logx.Errorf("watchGateway NewGateway(%+v) error: %v", v, err)
+				continue
 			}
 			clients[v] = cli
 		}
@@ -57,7 +66,7 @@ func (d *Dao) watchGateway(c zrpc.RpcClientConf) {
 		for key, old := range d.eGateServers {
 			if _, ok := clients[key]; !ok {
 				old.cancel()
-				logx.Infof("watchComet DelComet:%s", key)
+				logx.Infof("watchGateway DelGateway: %s", key)
 			}
 		}
 
@@ -69,10 +78,20 @@ func (d *Dao) watchGateway(c zrpc.RpcClientConf) {
 }
 
 func (d *Dao) SendDataToGateway(ctx context.Context, gatewayId string, authKeyId, salt, sessionId int64, msg *mtproto.TLMessageRawData) (bool, error) {
-	if c, ok := d.eGateServers[gatewayId]; ok {
-		return c.SendDataToGate(ctx, authKeyId, sessionId, SerializeToBuffer2(salt, sessionId, msg))
+	payload := SerializeToBuffer2(salt, sessionId, msg)
+
+	if d.UseStreamGateway && d.streamingGateway != nil {
+		return d.streamingGateway.SendDataToGateway(gatewayId, authKeyId, sessionId, payload)
+	}
+
+	d.gateMu.RLock()
+	c, ok := d.eGateServers[gatewayId]
+	d.gateMu.RUnlock()
+
+	if ok {
+		return c.SendDataToGate(ctx, authKeyId, sessionId, payload)
 	} else {
-		logx.WithContext(ctx).Errorf("not found k: %s, %v", gatewayId, d.eGateServers)
+		logx.WithContext(ctx).Errorf("not found k: %s", gatewayId)
 		return false, fmt.Errorf("not found k: %s", gatewayId)
 	}
 }

@@ -16,9 +16,10 @@ import (
 
 type Config struct {
 	zrpc.RpcServerConf
-	RSAKey  []RSAKey
-	Gnetway *GnetwayConfig
-	Session zrpc.RpcClientConf
+	RSAKey           []RSAKey
+	Gnetway          *GnetwayConfig
+	Session          zrpc.RpcClientConf
+	UseStreamSession bool `json:",default=false"`
 }
 
 type RSAKey struct {
@@ -33,10 +34,11 @@ type GnetwayServer struct {
 }
 
 type GnetwayConfig struct {
-	Server     []GnetwayServer
-	Multicore  bool
-	SendBuf    int
-	ReceiveBuf int
+	Server        []GnetwayServer
+	Multicore     bool
+	SendBuf       int
+	ReceiveBuf    int
+	AuthKeyCacheM int `json:",default=10"`
 }
 
 func (c GnetwayConfig) IsWebsocket(addr string) bool {

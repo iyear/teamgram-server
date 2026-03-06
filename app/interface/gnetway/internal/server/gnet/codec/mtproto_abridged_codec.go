@@ -32,6 +32,9 @@ import (
 // In this case, server responses look the same (the server does not send 0xefas the first byte).
 //
 
+// AbridgedCodec implements the MTProto abridged TCP transport.
+// It can work directly over plain TCP or be wrapped by ObfuscatedCodec to
+// run on top of an obfuscated transport.
 type AbridgedCodec struct {
 	*AesCTR128Crypto
 	state     int
@@ -48,7 +51,6 @@ func newMTProtoAbridgedCodec(crypto *AesCTR128Crypto) *AbridgedCodec {
 // Encode encodes frames upon server responses into TCP stream.
 func (c *AbridgedCodec) Encode(conn CodecWriter, msg interface{}) ([]byte, error) {
 	if msg == nil {
-		//logx.Error("conn(%s) msg is nil", conn)
 		return nil, nil
 	}
 
@@ -57,25 +59,32 @@ func (c *AbridgedCodec) Encode(conn CodecWriter, msg interface{}) ([]byte, error
 		err := fmt.Errorf("conn(%s) msg type error, only MTPRawMessage, msg: %s", conn, rm)
 		return nil, err
 	} else if rm == nil {
-		// logx.Errorf("conn(%s) msg is nil, msg: %#v", conn, msg)
 		return nil, nil
 	}
 
 	out := rm.Payload
-
-	// b := message.Encode() d
-	sb := make([]byte, 4)
-	// minus padding
 	size := len(out) / 4
 
+	var buf []byte
 	if size < 127 {
-		sb = []byte{byte(size)}
+		buf = make([]byte, 1+len(out))
+		buf[0] = byte(size)
+		copy(buf[1:], out)
 	} else {
-		binary.LittleEndian.PutUint32(sb, uint32(size<<8|127))
+		buf = make([]byte, 4+len(out))
+		binary.LittleEndian.PutUint32(buf, uint32(size<<8|127))
+		copy(buf[4:], out)
 	}
 
-	buf := append(sb, out...)
 	return c.Encrypt(buf), nil
+}
+
+// EncodeQuickAck encodes the Quick ACK token for the abridged transport.
+// The MTProto spec requires byte-swapping (big-endian wire order) for abridged.
+func (c *AbridgedCodec) EncodeQuickAck(token uint32) []byte {
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], token)
+	return c.Encrypt(buf[:])
 }
 
 // Decode decodes frames from TCP stream via specific implementation.
@@ -131,7 +140,6 @@ func (c *AbridgedCodec) Decode(conn CodecReader) (bool, []byte, error) {
 			payloads which were quick ACKed, as well as replies/errors for methods and constructors, as usual.
 		*/
 		needAck = c.packetLen[0]>>7 == 1
-		_ = needAck
 
 		n = int(c.packetLen[0] & 0x7f)
 		if n < 0x7f {
@@ -151,10 +159,12 @@ func (c *AbridgedCodec) Decode(conn CodecReader) (bool, []byte, error) {
 
 			c.state = WAIT_PACKET_LENGTH_3_PACKET
 			n = (int(c.packetLen[1]) | int(c.packetLen[2])<<8 | int(c.packetLen[3])<<16) << 2
-			// log.Debugf("n = %d", n)
+			if n <= 0 || n%4 != 0 {
+				return false, nil, ErrProtoBadLength
+			}
 			if n > MAX_MTPRORO_FRAME_SIZE {
-				// TODO(@benqi): close conn
-				return false, nil, fmt.Errorf("too large data(%d)", n)
+				// 上层收到 ErrProtoBadLength 后应主动关闭连接。
+				return false, nil, fmt.Errorf("%w: too large data(%d)", ErrProtoBadLength, n)
 			}
 		}
 		if buf, err = in.readN(n); err != nil {
@@ -168,12 +178,12 @@ func (c *AbridgedCodec) Decode(conn CodecReader) (bool, []byte, error) {
 		_, _ = conn.Discard(n)
 		c.state = WAIT_PACKET_LENGTH_1
 
-		// message := mtproto.NewMTPRawMessage(int64(binary.LittleEndian.Uint64(buf)), 0, TRANSPORT_TCP)
-		// _ = message.Decode(buf)
-
 		return needAck, buf, nil
 	case WAIT_PACKET_LENGTH_1_PACKET:
 		n = int(c.packetLen[0]&0x7f) << 2
+		if n <= 0 || n%4 != 0 {
+			return false, nil, ErrProtoBadLength
+		}
 		if buf, err = in.readN(n); err != nil {
 			return false, nil, ErrUnexpectedEOF
 		} else if len(buf) <= 8 {
@@ -185,9 +195,6 @@ func (c *AbridgedCodec) Decode(conn CodecReader) (bool, []byte, error) {
 		buf = c.Decrypt(buf)
 		_, _ = conn.Discard(n)
 		c.state = WAIT_PACKET_LENGTH_1
-
-		// message := mtproto.NewMTPRawMessage(int64(binary.LittleEndian.Uint64(buf)), 0, TRANSPORT_TCP)
-		// _ = message.Decode(buf)
 
 		return needAck, buf, nil
 	case WAIT_PACKET_LENGTH_3:
@@ -202,10 +209,11 @@ func (c *AbridgedCodec) Decode(conn CodecReader) (bool, []byte, error) {
 
 		c.state = WAIT_PACKET_LENGTH_3_PACKET
 		n = (int(c.packetLen[1]) | int(c.packetLen[2])<<8 | int(c.packetLen[3])<<16) << 2
-		// log.Debugf("n = %d", n)
+		if n <= 0 || n%4 != 0 {
+			return false, nil, ErrProtoBadLength
+		}
 		if n > MAX_MTPRORO_FRAME_SIZE {
-			// TODO(@benqi): close conn
-			return false, nil, fmt.Errorf("too large data(%d)", n)
+			return false, nil, fmt.Errorf("%w: too large data(%d)", ErrProtoBadLength, n)
 		}
 		if buf, err = in.readN(n); err != nil {
 			return false, nil, ErrUnexpectedEOF
@@ -217,17 +225,15 @@ func (c *AbridgedCodec) Decode(conn CodecReader) (bool, []byte, error) {
 		buf = c.Decrypt(buf)
 		_, _ = conn.Discard(n)
 		c.state = WAIT_PACKET_LENGTH_1
-
-		// message := mtproto.NewMTPRawMessage(int64(binary.LittleEndian.Uint64(buf)), 0, TRANSPORT_TCP)
-		// _ = message.Decode(buf)
 
 		return needAck, buf, nil
 	case WAIT_PACKET_LENGTH_3_PACKET:
 		n = (int(c.packetLen[1]) | int(c.packetLen[2])<<8 | int(c.packetLen[3])<<16) << 2
-		// log.Debugf("n = %d", n)
+		if n <= 0 || n%4 != 0 {
+			return false, nil, ErrProtoBadLength
+		}
 		if n > MAX_MTPRORO_FRAME_SIZE {
-			// TODO(@benqi): close conn
-			return false, nil, fmt.Errorf("too large data(%d)", n)
+			return false, nil, fmt.Errorf("%w: too large data(%d)", ErrProtoBadLength, n)
 		}
 		if buf, err = in.readN(n); err != nil {
 			return false, nil, ErrUnexpectedEOF
@@ -239,9 +245,6 @@ func (c *AbridgedCodec) Decode(conn CodecReader) (bool, []byte, error) {
 		buf = c.Decrypt(buf)
 		_, _ = conn.Discard(n)
 		c.state = WAIT_PACKET_LENGTH_1
-
-		// message := mtproto.NewMTPRawMessage(int64(binary.LittleEndian.Uint64(buf)), 0, TRANSPORT_TCP)
-		// _ = message.Decode(buf)
 
 		return needAck, buf, nil
 	}

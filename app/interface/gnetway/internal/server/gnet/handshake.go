@@ -207,45 +207,45 @@ func (s *Server) onHandshake(c gnet.Conn, mmsg []byte) (interface{}, error) {
 		return nil, err
 	}
 
-	x := mtproto.NewEncodeBuf(512)
-
 	switch request := obj.(type) {
 	case *mtproto.TLReqPq:
 		resPQ, err := s.onReqPq(c, request)
 		if err != nil {
-			// log.Errorf("onHandshake error: {%v} - {peer: %s, ctx: %s, mmsg: %s}", err, conn, ctx, mmsg)
-			// conn.Close()
 			return nil, err
 		}
-
 		ctx.putHandshakeStateCt(&HandshakeStateCtx{
 			State:       STATE_pq_res,
 			Nonce:       resPQ.GetNonce(),
 			ServerNonce: resPQ.GetServerNonce(),
 		})
-
-		_ = serializeToBuffer(x, mtproto.GenerateMessageId(), resPQ)
+		payload := func() []byte {
+			x := mtproto.GetEncodeBuf()
+			defer mtproto.PutEncodeBuf(x)
+			_ = serializeToBuffer(x, mtproto.GenerateMessageId(), resPQ)
+			return append([]byte(nil), x.GetBuf()...)
+		}()
 		return &mtproto.MTPRawMessage{
-			Payload: x.GetBuf(),
+			Payload: payload,
 		}, nil
 	case *mtproto.TLReqPqMulti:
 		resPQ, err := s.onReqPqMulti(c, request)
 		if err != nil {
-			// logx.Errorf("onHandshake error: onReqPqMulti conn(%s)}", err, c)
-			// conn.Close()
 			return nil, err
 		}
-
 		ctx.putHandshakeStateCt(&HandshakeStateCtx{
 			State:       STATE_pq_res,
 			Nonce:       resPQ.GetNonce(),
 			ServerNonce: resPQ.GetServerNonce(),
 		})
-
 		logx.Infof("req_pq_multi: nonce: %s, nonce: %s", hex.EncodeToString(request.Nonce), hex.EncodeToString(resPQ.Nonce))
-		_ = serializeToBuffer(x, mtproto.GenerateMessageId(), resPQ)
+		payload := func() []byte {
+			x := mtproto.GetEncodeBuf()
+			defer mtproto.PutEncodeBuf(x)
+			_ = serializeToBuffer(x, mtproto.GenerateMessageId(), resPQ)
+			return append([]byte(nil), x.GetBuf()...)
+		}()
 		return &mtproto.MTPRawMessage{
-			Payload: x.GetBuf(),
+			Payload: payload,
 		}, nil
 	case *mtproto.TLReq_DHParams:
 		if ctx == nil {
@@ -510,13 +510,15 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 			//}
 
 			// 2. 反序列化出pqInnerData
-			dbuf := mtproto.NewDecodeBuf(paddedDataWithHash)
+			dbuf := mtproto.GetDecodeBuf(paddedDataWithHash)
 			o := dbuf.Object()
 			if dbuf.GetError() != nil {
+				mtproto.PutDecodeBuf(dbuf)
 				err = fmt.Errorf("onReq_DHParams - decode P_Q_inner_data error")
 				logx.Error(err.Error())
 				return err
 			}
+			mtproto.PutDecodeBuf(dbuf)
 
 			var pqInnerData *mtproto.P_QInnerData
 			// TODO(@benqi):
@@ -602,16 +604,28 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 				ServerTime:  int32(time.Now().Unix()),
 			}}
 
-			x := mtproto.NewEncodeBuf(512)
-			serverDHInnerData.Encode(x, 0)
-			serverDHInnerDataBuf := x.GetBuf()
-			// server_DHInnerData_buf_sha1 := sha1.Sum(server_DHInnerData_buf)
+			serverDHInnerDataBuf := func() []byte {
+				x := mtproto.GetEncodeBuf()
+				defer mtproto.PutEncodeBuf(x)
+				serverDHInnerData.Encode(x, 0)
+				return append([]byte(nil), x.GetBuf()...)
+			}()
 
 			// 创建aes和iv key
 			tmpAesKeyAndIV := make([]byte, 64)
-			sha1A := sha1.Sum(append(newNonce, request.ServerNonce...))
-			sha1B := sha1.Sum(append(request.ServerNonce, newNonce...))
-			sha1C := sha1.Sum(append(newNonce, newNonce...))
+			var shaBuf [64]byte // stack buffer for SHA1 input concatenation
+			// sha1(newNonce + serverNonce)
+			copy(shaBuf[:], newNonce)
+			copy(shaBuf[len(newNonce):], request.ServerNonce)
+			sha1A := sha1.Sum(shaBuf[:len(newNonce)+len(request.ServerNonce)])
+			// sha1(serverNonce + newNonce)
+			copy(shaBuf[:], request.ServerNonce)
+			copy(shaBuf[len(request.ServerNonce):], newNonce)
+			sha1B := sha1.Sum(shaBuf[:len(request.ServerNonce)+len(newNonce)])
+			// sha1(newNonce + newNonce)
+			copy(shaBuf[:], newNonce)
+			copy(shaBuf[len(newNonce):], newNonce)
+			sha1C := sha1.Sum(shaBuf[:len(newNonce)+len(newNonce)])
 			copy(tmpAesKeyAndIV, sha1A[:])
 			copy(tmpAesKeyAndIV[20:], sha1B[:])
 			copy(tmpAesKeyAndIV[40:], sha1C[:])
@@ -651,10 +665,14 @@ func (s *Server) onReqDHParams(c gnet.Conn, ctx *HandshakeStateCtx, request *mtp
 			ctx.P = P
 			ctx.State = STATE_DH_params_res
 
-			x := mtproto.NewEncodeBuf(512)
-			_ = serializeToBuffer(x, mtproto.GenerateMessageId(), serverDHParams)
+			payload := func() []byte {
+				x := mtproto.GetEncodeBuf()
+				defer mtproto.PutEncodeBuf(x)
+				_ = serializeToBuffer(x, mtproto.GenerateMessageId(), serverDHParams)
+				return append([]byte(nil), x.GetBuf()...)
+			}()
 			_ = UnThreadSafeWrite(c, &mtproto.MTPRawMessage{
-				Payload: x.GetBuf(),
+				Payload: payload,
 			})
 			logx.WithDuration(timex.Since(since2)).Infof("_ = UnThreadSafeWrite(c, &mtproto.MTPRawMessage{")
 		})
@@ -691,9 +709,16 @@ func (s *Server) onSetClientDHParams(c gnet.Conn, ctx *HandshakeStateCtx, reques
 
 	// 创建aes和iv key
 	tmpAesKeyAndIv := make([]byte, 64)
-	sha1A := sha1.Sum(append(ctx.NewNonce, ctx.ServerNonce...))
-	sha1B := sha1.Sum(append(ctx.ServerNonce, ctx.NewNonce...))
-	sha1C := sha1.Sum(append(ctx.NewNonce, ctx.NewNonce...))
+	var shaBuf2 [64]byte
+	copy(shaBuf2[:], ctx.NewNonce)
+	copy(shaBuf2[len(ctx.NewNonce):], ctx.ServerNonce)
+	sha1A := sha1.Sum(shaBuf2[:len(ctx.NewNonce)+len(ctx.ServerNonce)])
+	copy(shaBuf2[:], ctx.ServerNonce)
+	copy(shaBuf2[len(ctx.ServerNonce):], ctx.NewNonce)
+	sha1B := sha1.Sum(shaBuf2[:len(ctx.ServerNonce)+len(ctx.NewNonce)])
+	copy(shaBuf2[:], ctx.NewNonce)
+	copy(shaBuf2[len(ctx.NewNonce):], ctx.NewNonce)
+	sha1C := sha1.Sum(shaBuf2[:len(ctx.NewNonce)+len(ctx.NewNonce)])
 	copy(tmpAesKeyAndIv, sha1A[:])
 	copy(tmpAesKeyAndIv[20:], sha1B[:])
 	copy(tmpAesKeyAndIv[40:], sha1C[:])
@@ -709,10 +734,11 @@ func (s *Server) onSetClientDHParams(c gnet.Conn, ctx *HandshakeStateCtx, reques
 	logx.WithDuration(timex.Since(since)).Infof("decryptedData, err := d.Decrypt(bEncryptedData): %s", c)
 
 	// TODO(@benqi): 检查签名是否合法
-	dBuf := mtproto.NewDecodeBuf(decryptedData[20:])
+	dBuf := mtproto.GetDecodeBuf(decryptedData[20:])
 	clientDHInnerData := mtproto.MakeTLClient_DHInnerData(nil)
 	clientDHInnerData.Data2.Constructor = mtproto.TLConstructor(dBuf.Int())
 	err = clientDHInnerData.Decode(dBuf)
+	mtproto.PutDecodeBuf(dBuf)
 	if err != nil {
 		logx.Errorf("onSetClientDHParams conn(%s) - TLClient_DHInnerData decode error: %s", c, err)
 		return nil, err
@@ -795,10 +821,14 @@ func (s *Server) onSetClientDHParams(c gnet.Conn, ctx *HandshakeStateCtx, reques
 		func(c gnet.Conn) {
 			ctx.State = STATE_dh_gen_res
 
-			x := mtproto.NewEncodeBuf(512)
-			serializeToBuffer(x, mtproto.GenerateMessageId(), dhGen)
+			payload := func() []byte {
+				x := mtproto.GetEncodeBuf()
+				defer mtproto.PutEncodeBuf(x)
+				serializeToBuffer(x, mtproto.GenerateMessageId(), dhGen)
+				return append([]byte(nil), x.GetBuf()...)
+			}()
 			UnThreadSafeWrite(c, &mtproto.MTPRawMessage{
-				Payload: x.GetBuf(),
+				Payload: payload,
 			})
 		})
 
@@ -887,14 +917,17 @@ func (s *Server) saveAuthKeyInfo(ctx *HandshakeStateCtx, key *mtproto.AuthKeyInf
 }
 
 func calcNewNonceHash(newNonce, authKey []byte, b byte) []byte {
-	authKeyAuxHash := make([]byte, len(newNonce))
-	copy(authKeyAuxHash, newNonce)
-	authKeyAuxHash = append(authKeyAuxHash, b)
+	// newNonce is 32 bytes, total buffer: 32 + 1 + 20 + 20 = 73
+	var buf [73]byte
+	copy(buf[:32], newNonce)
+	buf[32] = b
 	sha1D := sha1.Sum(authKey)
-	authKeyAuxHash = append(authKeyAuxHash, sha1D[:]...)
-	sha1E := sha1.Sum(authKeyAuxHash[:len(authKeyAuxHash)-12])
-	authKeyAuxHash = append(authKeyAuxHash, sha1E[:]...)
-	return authKeyAuxHash[len(authKeyAuxHash)-16:]
+	copy(buf[33:53], sha1D[:])
+	sha1E := sha1.Sum(buf[:41]) // 32 + 1 + 8 = 41 (total - 12 when using first 53 bytes)
+	copy(buf[53:], sha1E[:])
+	result := make([]byte, 16)
+	copy(result, buf[73-16:])
+	return result
 }
 
 func checkSha1(data []byte, maxPaddingLen int) bool {

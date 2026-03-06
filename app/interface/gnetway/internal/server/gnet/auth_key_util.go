@@ -60,6 +60,10 @@ func (k *authKeyUtil) MediaTempAuthKeyId() int64 {
 	return k.keyData.MediaTempAuthKeyId
 }
 
+func (k *authKeyUtil) AuthKey() []byte {
+	return k.key.AuthKey()
+}
+
 func (k *authKeyUtil) AesIgeEncrypt(rawData []byte) ([]byte, []byte, error) {
 	return k.key.AesIgeEncrypt(rawData)
 }

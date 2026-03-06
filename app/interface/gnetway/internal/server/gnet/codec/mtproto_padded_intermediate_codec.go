@@ -24,15 +24,9 @@ import (
 	"github.com/teamgram/proto/mtproto"
 )
 
-// PaddedIntermediateCodec
-// https://core.telegram.org/mtproto#tcp-transport
-//
-// In case 4-byte data alignment is needed,
-// an intermediate version of the original protocol may be used:
-// if the client sends 0xeeeeeeee as the first int (four bytes),
-// then packet length is encoded always by four bytes as in the original version,
-// but the sequence number and CRC32 are omitted,
-// thus decreasing total packet size by 8 bytes.
+// PaddedIntermediateCodec implements the MTProto padded intermediate transport.
+// Compared to intermediate, it allows random padding bytes after the payload
+// to make traffic analysis more difficult.
 type PaddedIntermediateCodec struct {
 	*AesCTR128Crypto
 	state     int
@@ -57,18 +51,25 @@ func (c *PaddedIntermediateCodec) Encode(conn CodecWriter, msg interface{}) ([]b
 	rawMsg, ok := msg.(*mtproto.MTPRawMessage)
 	if !ok {
 		err := fmt.Errorf("msg type error, only MTPRawMessage, msg: {%v}", msg)
-		// log.Error(err.Error())
 		return nil, err
 	}
 
-	sb := make([]byte, 4)
-	size := len(rawMsg.Payload)
+	paddingLen := rand2.Int() % 16
+	buf := make([]byte, 4+len(rawMsg.Payload)+paddingLen)
+	binary.LittleEndian.PutUint32(buf, uint32(len(rawMsg.Payload)))
+	copy(buf[4:], rawMsg.Payload)
+	if paddingLen > 0 {
+		_, _ = rand.Read(buf[4+len(rawMsg.Payload):])
+	}
 
-	binary.LittleEndian.PutUint32(sb, uint32(size))
-	b := append(sb, rawMsg.Payload...)
-	b = append(b, generatePadding(rand2.Int()%16)...)
+	return c.Encrypt(buf), nil
+}
 
-	return c.Encrypt(b), nil
+// EncodeQuickAck encodes the Quick ACK token for the padded intermediate transport.
+func (c *PaddedIntermediateCodec) EncodeQuickAck(token uint32) []byte {
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], token)
+	return c.Encrypt(buf[:])
 }
 
 // Decode decodes frames from TCP stream via specific implementation.
@@ -87,18 +88,19 @@ func (c *PaddedIntermediateCodec) Decode(conn CodecReader) (bool, []byte, error)
 		if buf, err = in.readN(4); err != nil {
 			return false, nil, ErrUnexpectedEOF
 		}
-		_, _ = conn.Discard(1)
+		_, _ = conn.Discard(4)
 		buf = c.Decrypt(buf)
 		c.packetLen = binary.LittleEndian.Uint32(buf)
 		c.state = WAIT_PACKET
 	}
 
 	needAck = c.packetLen>>31 == 1
-	_ = needAck
-	n = int(c.packetLen & 0xffffff)
+	n = int(c.packetLen & 0x7fffffff)
+	if n <= 0 || n%4 != 0 {
+		return false, nil, ErrProtoBadLength
+	}
 	if n > MAX_MTPRORO_FRAME_SIZE {
-		// TODO(@benqi): close conn
-		return false, nil, fmt.Errorf("too large data(%d)", n)
+		return false, nil, fmt.Errorf("%w: too large data(%d)", ErrProtoBadLength, n)
 	}
 
 	if buf, err = in.readN(n); err != nil {
@@ -107,9 +109,6 @@ func (c *PaddedIntermediateCodec) Decode(conn CodecReader) (bool, []byte, error)
 	buf = c.Decrypt(buf)
 	_, _ = conn.Discard(n)
 	c.state = WAIT_PACKET_LENGTH
-
-	// message := mtproto.NewMTPRawMessage(int64(binary.LittleEndian.Uint64(buf)), 0, TRANSPORT_TCP)
-	// _ = message.Decode(buf)
 
 	return needAck, buf, nil
 }

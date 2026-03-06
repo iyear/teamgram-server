@@ -11,6 +11,7 @@ package dao
 
 import (
 	"context"
+	"sync"
 
 	"github.com/teamgram/marmota/pkg/cache"
 	"github.com/teamgram/marmota/pkg/net/ip"
@@ -29,8 +30,11 @@ type Dao struct {
 	authsession_client.AuthsessionClient
 	status_client.StatusClient
 	*bff_proxy_client.BFFProxyClient
-	eGateServers map[string]*Gateway
-	MyServerId   string
+	gateMu           sync.RWMutex
+	eGateServers     map[string]*Gateway
+	MyServerId       string
+	UseStreamGateway bool
+	streamingGateway *StreamingGateway
 	*RpcShardingManager
 }
 
@@ -43,7 +47,12 @@ func New(c config.Config) *Dao {
 		StatusClient:       status_client.NewStatusClient(zrpc.MustNewClient(c.StatusClient)),
 		eGateServers:       make(map[string]*Gateway),
 		MyServerId:         myServerId,
+		UseStreamGateway:   c.UseStreamGateway,
 		RpcShardingManager: NewRpcShardingManager(myServerId, c.Etcd),
+	}
+
+	if c.UseStreamGateway {
+		d.streamingGateway = NewStreamingGateway()
 	}
 
 	d.watchGateway(c.GatewayClient)

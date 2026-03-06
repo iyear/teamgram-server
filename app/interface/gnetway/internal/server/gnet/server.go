@@ -17,10 +17,13 @@ package gnet
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/teamgram/marmota/pkg/cache"
 	"github.com/teamgram/teamgram-server/app/interface/gnetway/internal/config"
+	"github.com/teamgram/teamgram-server/app/interface/gnetway/internal/server/gnet/codec"
 	"github.com/teamgram/teamgram-server/app/interface/gnetway/internal/svc"
 
 	"github.com/panjf2000/gnet/v2"
@@ -44,6 +47,17 @@ type Server struct {
 	authSessionMgr *authSessionManager
 	svcCtx         *svc.ServiceContext
 	tickNumber     int64
+	cachedNow      atomic.Int64 // cached unix timestamp, updated every OnTick
+	timeoutWheel   *timeoutWheel
+}
+
+// CachedNow returns the cached unix timestamp (updated every OnTick interval).
+// Falls back to time.Now() if not yet initialized.
+func (s *Server) CachedNow() int64 {
+	if n := s.cachedNow.Load(); n > 0 {
+		return n
+	}
+	return time.Now().Unix()
 }
 
 func New(svcCtx *svc.ServiceContext, c config.Config) *Server {
@@ -52,10 +66,16 @@ func New(svcCtx *svc.ServiceContext, c config.Config) *Server {
 	)
 
 	s.authSessionMgr = NewAuthSessionManager()
+	s.timeoutWheel = newTimeoutWheel()
 
 	s.handshake = mustNewHandshake(c.RSAKey)
 
-	s.cache = cache.NewLRUCache(10 * 1024 * 1024) // cache capacity: 10MB
+	cacheSizeMB := c.Gnetway.AuthKeyCacheM
+	if cacheSizeMB <= 0 {
+		cacheSizeMB = 10
+	}
+	s.cache = cache.NewLRUCache(int64(cacheSizeMB) * 1024 * 1024)
+
 	s.pool = goroutine.Default()
 
 	s.c = &c
@@ -65,6 +85,28 @@ func New(svcCtx *svc.ServiceContext, c config.Config) *Server {
 		s.Serve()
 	}()
 	return s
+}
+
+// classifyCodecError maps codec errors to a stable reason label for metrics.
+func classifyCodecError(err error) string {
+	switch {
+	case errors.Is(err, codec.ErrProtoBadMagic):
+		return "bad_magic"
+	case errors.Is(err, codec.ErrProtoBadLength):
+		return "bad_len"
+	case errors.Is(err, codec.ErrProtoBadCRC):
+		return "bad_crc"
+	case errors.Is(err, codec.ErrProtoBadSeq):
+		return "bad_seq"
+	case errors.Is(err, codec.ErrProtoDecrypt):
+		return "decrypt"
+	case errors.Is(err, codec.ErrTransportNotSupported):
+		return "transport_unsupported"
+	case errors.Is(err, codec.ErrUnexpectedEOF):
+		return "unexpected_eof"
+	default:
+		return "other"
+	}
 }
 
 func (s *Server) Close() {

@@ -1,6 +1,7 @@
 package pp
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -23,6 +24,12 @@ func ReadV2Header(r io.Reader) (*Header, error) {
 	if _, err := io.ReadFull(r, buf[0:13]); err != nil {
 		return nil, errors.Wrap(err, "while reading proxy proto identifier")
 	}
+
+	// Validate v2 signature to avoid parsing non‑PROXY v2 traffic
+	if !bytes.HasPrefix(buf[0:12], V2Identifier) {
+		return nil, fmt.Errorf("invalid proxy protocol v2 signature")
+	}
+
 	return readV2Header(buf[0:], r)
 }
 
@@ -76,6 +83,8 @@ func readV2Header(buf []byte, r io.Reader) (*Header, error) {
 
 		// Translate the addresses according to the family
 		switch buf[13] {
+		case 0x00: // AF_UNSPEC / UNSPEC: no address, TLVs only (if any)
+			// leave offset at 0 so that any trailing data is exposed as RawTLVs below
 		case 0x11, 0x12: // IPV4 (TCP/UDP)
 			if len(tr) < ipv4AddressLen {
 				return nil, fmt.Errorf("expected %d bytes for IPV4 address", ipv4AddressLen)
@@ -118,7 +127,13 @@ func readV2Header(buf []byte, r io.Reader) (*Header, error) {
 		case 0x31, 0x32: // UNIX (STREAM/DGRAM)
 			// Not implemented by haproxy and I see no need to implement it here, patches welcome!
 			return &h, errors.New("Received UNIX socket proxy command, Currently not supported")
+		default:
+			// Unknown or unsupported family/proto combination
+			return nil, fmt.Errorf("unsupported protocol family '%X'", buf[13])
 		}
+	default:
+		// Per spec, receivers must reject unsupported commands
+		return nil, fmt.Errorf("unsupported proxy protocol v2 command '%X'", buf[12]&0x0F)
 	}
 
 	// If there is trailing data, it should be TLVs

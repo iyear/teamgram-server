@@ -16,6 +16,7 @@
 package gnet
 
 import (
+	"encoding/hex"
 	"fmt"
 
 	"github.com/teamgram/proto/mtproto"
@@ -53,4 +54,28 @@ func (s *Server) PutAuthKey(keyInfo *mtproto.AuthKeyInfo) {
 
 	// TODO: expires_in
 	s.cache.Set(cacheK, &CacheV{V: keyInfo})
+}
+
+// HandshakeCacheV wraps HandshakeStateCtx for LRU cache storage.
+type HandshakeCacheV struct {
+	State *HandshakeStateCtx
+}
+
+func (c HandshakeCacheV) Size() int {
+	return 1
+}
+
+// GetHttpHandshakeState retrieves handshake state from cache by nonce (for HTTP transport).
+func (s *Server) GetHttpHandshakeState(nonce []byte) *HandshakeStateCtx {
+	key := "hs:" + hex.EncodeToString(nonce)
+	if v, ok := s.cache.Get(key); ok {
+		return v.(*HandshakeCacheV).State
+	}
+	return nil
+}
+
+// PutHttpHandshakeState stores handshake state in cache by nonce (for HTTP transport).
+func (s *Server) PutHttpHandshakeState(state *HandshakeStateCtx) {
+	key := "hs:" + hex.EncodeToString(state.Nonce)
+	s.cache.Set(key, &HandshakeCacheV{State: state})
 }

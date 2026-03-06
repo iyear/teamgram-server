@@ -121,8 +121,8 @@ type session struct {
 	pushQueue       *sessionPushQueue
 	sessList        *SessionList
 	canSync         bool
-	// isHttp       bool
-	// httpQueue    *httpRequestQueue
+	isHttp          bool
+	httpQueue       *httpRequestQueue
 }
 
 func newSession(sessionId int64, sessList *SessionList) *session {
@@ -143,8 +143,8 @@ func newSession(sessionId int64, sessList *SessionList) *session {
 		pushQueue:       newSessionPushQueue(),
 		sessList:        sessList,
 		canSync:         false,
-		// isHttp:       false,
-		// httpQueue:    newHttpRequestQueue(),
+		isHttp:          false,
+		httpQueue:       newHttpRequestQueue(),
 	}
 
 	return sess
@@ -197,9 +197,10 @@ func (c *session) changeConnState(ctx context.Context, state int) {
 }
 
 func (c *session) onSessionConnNew(ctx context.Context, id string) {
+	// 始终更新 gatewayId，避免重连后仍向旧 gateway 发送数据。
+	c.setGatewayId(id)
 	if c.connState != kStateOnline {
 		c.changeConnState(ctx, kStateOnline)
-		c.setGatewayId(id)
 	}
 }
 
@@ -264,19 +265,18 @@ func (c *session) onSessionMessageData(ctx context.Context, gatewayId, clientIp 
 	}
 
 	// check onNewSessionCreated
+	// firstMsgId should be the earliest msg_id received in this session.
 	minMsgId := msg.MsgId
 	for _, m2 := range msgs {
-		if minMsgId < m2.MsgId {
+		if m2.MsgId < minMsgId {
 			minMsgId = m2.MsgId
 		}
 	}
 
-	if c.sessionState == kSessionStateNew || minMsgId < c.firstMsgId {
+	if c.sessionState == kSessionStateNew || c.firstMsgId == 0 || minMsgId < c.firstMsgId {
 		logx.WithContext(ctx).Infof("onNewSessionCreated - %#v, c: %s", msgs, c)
 		c.onNewSessionCreated(ctx, gatewayId, minMsgId)
-		if c.firstMsgId != 0 {
-			c.firstMsgId = minMsgId
-		}
+		c.firstMsgId = minMsgId
 		c.sessionState = kSessionStateCreated
 	}
 
@@ -315,9 +315,11 @@ func (c *session) onSessionMessageData(ctx context.Context, gatewayId, clientIp 
 				// 第一次收到
 				c.processMsg(ctx, gatewayId, clientIp, inMsg, m2.Object)
 			} else {
-				// TODO(@benqi): resend
-				// 已经收到，返回发送状态
-				// c.notifyMsgsStateInfo(gatewayId, inMsg)
+				// Duplicate message: for large RPC replies, prefer sending MsgDetailedInfo
+				// instead of resending the full answer.
+				if o := c.outQueue.Lookup(inMsg.msgId); o != nil && o.msg != nil && o.msg.Bytes > detailedInfoThreshold {
+					c.notifyMsgDetailedInfo(ctx, gatewayId, inMsg, o)
+				}
 				continue
 			}
 		}
@@ -414,15 +416,17 @@ func (c *session) onTimer(ctx context.Context) bool {
 			})
 	}
 
-	//httpTimeOutList := c.httpQueue.PopTimeoutList()
-	//if len(httpTimeOutList) > 0 {
-	//	logx.WithContext(ctx).Infof("timeoutList: %d", len(httpTimeOutList))
-	//}
-	//for _, ch := range httpTimeOutList {
-	//	c.sendHttpDirectToGateway(ctx, ch, false, emptyMsgContainer, func(sentRaw *mtproto.TLMessageRawData) {
-	//		//
-	//	})
-	//}
+	if c.isHttp && c.httpQueue != nil {
+		httpTimeOutList := c.httpQueue.PopTimeoutList()
+		if len(httpTimeOutList) > 0 {
+			logx.WithContext(ctx).Infof("http timeout list size: %d", len(httpTimeOutList))
+		}
+		for _, ch := range httpTimeOutList {
+			_, _ = c.sendHttpDirectToGateway(ctx, ch, false, emptyMsgContainer, func(sentRaw *mtproto.TLMessageRawData) {
+				// nothing to do
+			})
+		}
+	}
 
 	if c.connState == kStateOnline {
 		if date >= c.closeDate {
@@ -433,6 +437,9 @@ func (c *session) onTimer(ctx context.Context) bool {
 		}
 	} else if c.connState == kStateOffline || c.connState == kStateNew {
 		if date >= c.closeDate+kCacheSessionTimeout {
+			if c.httpQueue != nil {
+				c.httpQueue.Clear()
+			}
 			c.changeConnState(context.Background(), kStateClose)
 		}
 	}
@@ -454,14 +461,17 @@ func (c *session) sendRpcResultToQueue(ctx context.Context, gatewayId string, re
 		ReqMsgId: reqMsgId,
 		Result:   result,
 	}
-	x := mtproto.NewEncodeBuf(500)
-	rpcResult.Encode(x, c.sessList.cb.Layer())
-	rawMsg := &mtproto.TLMessageRawData{
-		MsgId: nextMessageId(true),
-		Seqno: c.generateMessageSeqNo(true),
-		Bytes: int32(x.GetOffset()),
-		Body:  x.GetBuf(),
-	}
+	rawMsg := func() *mtproto.TLMessageRawData {
+		x := mtproto.GetEncodeBuf()
+		defer mtproto.PutEncodeBuf(x)
+		rpcResult.Encode(x, c.sessList.cb.Layer())
+		return &mtproto.TLMessageRawData{
+			MsgId: nextMessageId(true),
+			Seqno: c.generateMessageSeqNo(true),
+			Bytes: int32(x.GetOffset()),
+			Body:  append([]byte(nil), x.GetBuf()...),
+		}
+	}()
 	c.outQueue.AddRpcResultMsg(reqMsgId, rawMsg)
 	// cb(rawMsg)
 }
@@ -483,16 +493,22 @@ func (c *session) sendPushRpcResultToQueue(gatewayId string, reqMsgId int64, res
 }
 
 func (c *session) sendPushToQueue(ctx context.Context, gatewayId string, pushMsgId int64, pushMsg mtproto.TLObject) {
-	x := mtproto.NewEncodeBuf(512)
-	pushMsg.Encode(x, c.sessList.cb.Layer())
-	rawBytes := x.GetBuf()
-	if x.GetOffset() > 256 {
+	rawBytes := func() []byte {
+		x := mtproto.GetEncodeBuf()
+		defer mtproto.PutEncodeBuf(x)
+		pushMsg.Encode(x, c.sessList.cb.Layer())
+		return append([]byte(nil), x.GetBuf()...)
+	}()
+	if len(rawBytes) > 256 {
 		gzipPacked := &mtproto.TLGzipPacked{
 			PackedData: rawBytes,
 		}
-		x2 := mtproto.NewEncodeBuf(512)
-		gzipPacked.Encode(x2, c.sessList.cb.Layer())
-		rawBytes = x2.GetBuf()
+		rawBytes = func() []byte {
+			x2 := mtproto.GetEncodeBuf()
+			defer mtproto.PutEncodeBuf(x2)
+			gzipPacked.Encode(x2, c.sessList.cb.Layer())
+			return append([]byte(nil), x2.GetBuf()...)
+		}()
 	}
 
 	rawMsg := &mtproto.TLMessageRawData{
@@ -505,9 +521,12 @@ func (c *session) sendPushToQueue(ctx context.Context, gatewayId string, pushMsg
 }
 
 func (c *session) sendRawToQueue(ctx context.Context, gatewayId string, msgId int64, confirm bool, rawMsg mtproto.TLObject) {
-	x := mtproto.NewEncodeBuf(512)
-	rawMsg.Encode(x, c.sessList.cb.Layer())
-	b := x.GetBuf()
+	b := func() []byte {
+		x := mtproto.GetEncodeBuf()
+		defer mtproto.PutEncodeBuf(x)
+		rawMsg.Encode(x, c.sessList.cb.Layer())
+		return append([]byte(nil), x.GetBuf()...)
+	}()
 	rawMsg2 := &mtproto.TLMessageRawData{
 		MsgId: nextMessageId(false),
 		Seqno: c.generateMessageSeqNo(confirm),
@@ -522,10 +541,13 @@ func (c *session) sendHttpDirectToGateway(ctx context.Context, ch chan interface
 		return false, nil
 	}
 
-	x := mtproto.NewEncodeBuf(512)
 	salt := c.sessList.cacheSalt.GetSalt()
-	obj.Encode(x, c.sessList.cb.Layer())
-	b := x.GetBuf()
+	b := func() []byte {
+		x := mtproto.GetEncodeBuf()
+		defer mtproto.PutEncodeBuf(x)
+		obj.Encode(x, c.sessList.cb.Layer())
+		return append([]byte(nil), x.GetBuf()...)
+	}()
 	rawMsg := &mtproto.TLMessageRawData{
 		MsgId: nextMessageId(false),
 		Seqno: c.generateMessageSeqNo(confirm),
@@ -557,10 +579,13 @@ func (c *session) sendDirectToGateway(ctx context.Context, gatewayId string, con
 		return false, nil
 	}
 
-	x := mtproto.NewEncodeBuf(512)
 	salt := c.sessList.cacheSalt.GetSalt()
-	_ = obj.Encode(x, c.sessList.cb.Layer())
-	b := x.GetBuf()
+	b := func() []byte {
+		x := mtproto.GetEncodeBuf()
+		defer mtproto.PutEncodeBuf(x)
+		_ = obj.Encode(x, c.sessList.cb.Layer())
+		return append([]byte(nil), x.GetBuf()...)
+	}()
 
 	rawMsg := &mtproto.TLMessageRawData{
 		MsgId: nextMessageId(false),
@@ -574,25 +599,23 @@ func (c *session) sendDirectToGateway(ctx context.Context, gatewayId string, con
 		err error
 	)
 
-	//if !c.isHttp {
-	rB, err = c.sessList.cb.cb.Dao.SendDataToGateway(
-		ctx,
-		gatewayId,
-		c.sessList.authId,
-		salt,
-		c.sessionId,
-		rawMsg)
-	//} else {
-	//	if ch := c.httpQueue.Pop(); ch != nil {
-	//		rB, err = c.sessList.cb.cb.Dao.SendHttpDataToGateway(
-	//			ctx,
-	//			ch,
-	//			c.sessList.authId,
-	//			salt,
-	//			c.sessionId,
-	//			rawMsg)
-	//	}
-	//}
+	if !c.isHttp {
+		rB, err = c.sessList.cb.cb.Dao.SendDataToGateway(
+			ctx,
+			gatewayId,
+			c.sessList.authId,
+			salt,
+			c.sessionId,
+			rawMsg)
+	} else if ch := c.httpQueue.Pop(); ch != nil {
+		rB, err = c.sessList.cb.cb.Dao.SendHttpDataToGateway(
+			ctx,
+			ch,
+			c.sessList.authId,
+			salt,
+			c.sessionId,
+			rawMsg)
+	}
 
 	if err != nil {
 		logx.WithContext(ctx).Errorf("sendToClient - %v", err)
@@ -617,25 +640,23 @@ func (c *session) sendRawDirectToGateway(ctx context.Context, gatewayId string, 
 		err error
 	)
 
-	//if !c.isHttp {
-	rB, err = c.sessList.cb.cb.Dao.SendDataToGateway(
-		ctx,
-		gatewayId,
-		c.sessList.authId,
-		salt,
-		c.sessionId,
-		raw)
-	//} else {
-	//	if ch := c.httpQueue.Pop(); ch != nil {
-	//		rB, err = c.sessList.cb.cb.Dao.SendHttpDataToGateway(
-	//			ctx,
-	//			ch,
-	//			c.sessList.authId,
-	//			salt,
-	//			c.sessionId,
-	//			raw)
-	//	}
-	//}
+	if !c.isHttp {
+		rB, err = c.sessList.cb.cb.Dao.SendDataToGateway(
+			ctx,
+			gatewayId,
+			c.sessList.authId,
+			salt,
+			c.sessionId,
+			raw)
+	} else if ch := c.httpQueue.Pop(); ch != nil {
+		rB, err = c.sessList.cb.cb.Dao.SendHttpDataToGateway(
+			ctx,
+			ch,
+			c.sessList.authId,
+			salt,
+			c.sessionId,
+			raw)
+	}
 
 	if err != nil {
 		logx.WithContext(ctx).Errorf("sess: %s >>> sendRawDirectToGateway - %v", c, err)
@@ -654,8 +675,6 @@ func (c *session) sendQueueToGateway(ctx context.Context, gatewayId string) {
 
 	var (
 		pendings = make([]*outboxMsg, 0)
-		b        = false
-		err      error
 		sentTime = time.Now().Unix()
 	)
 	for e := c.outQueue.oMsgs.Front(); e != nil; e = e.Next() {
@@ -668,79 +687,71 @@ func (c *session) sendQueueToGateway(ctx context.Context, gatewayId string) {
 		}
 	}
 
+	if len(pendings) == 0 {
+		return
+	}
+
 	if len(pendings) == 1 {
 		logx.WithContext(ctx).Infof("sess: %s >>> sendRawDirectToGateway - pendings[0]", c)
-		b, err = c.sendRawDirectToGateway(ctx, gatewayId, pendings[0].msg)
-		// log.Debugf("err: %v, b: %v", err, b)
-		if err != nil || !b {
+		if ok, err := c.sendRawDirectToGateway(ctx, gatewayId, pendings[0].msg); err != nil || !ok {
 			return
 		}
+		c.updatePendingStates(ctx, pendings, sentTime)
+		return
+	}
 
-		for _, m := range pendings {
-			if m.state == NEED_NO_ACK {
-				logx.WithContext(ctx).Infof("sess: %s >>> need_no_ack: %d", c, m.msgId)
-				c.outQueue.Remove(m.msgId)
-			} else {
-				logx.WithContext(ctx).Infof("sess: %s >>> pending sent: %d", c, m.msgId)
-				m.sent = sentTime
-			}
-		}
-	} else if len(pendings) > 1 {
-		var (
-			split = 16
-		)
-		for i := 0; i < len(pendings)/split; i++ {
-			msgContainer := &mtproto.TLMsgRawDataContainer{
-				Messages: make([]*mtproto.TLMessageRawData, 0, split),
-			}
-			for _, m := range pendings[i*split : (i+1)*split] {
-				msgContainer.Messages = append(msgContainer.Messages, m.msg)
-			}
-			logx.WithContext(ctx).Infof("sess: %s >>> sendRawDirectToGateway - TLMsgRawDataContainer", c)
-			b, err = c.sendDirectToGateway(ctx, gatewayId, false, msgContainer, func(sentRaw *mtproto.TLMessageRawData) {
-				// TODO(@benqi):
-				// nothing do
-			})
-			// log.Debugf("err: %v, b: %v", err, b)
-			if err != nil || !b {
-				continue
-			}
+	c.sendPendingInBatches(ctx, gatewayId, pendings, sentTime)
+}
 
-			for _, m := range pendings[i*split : (i+1)*split] {
-				if m.state == NEED_NO_ACK {
-					logx.WithContext(ctx).Infof("sess: %s >>> need_no_ack: %d", c, m.msgId)
-					c.outQueue.Remove(m.msgId)
-				} else {
-					logx.WithContext(ctx).Infof("sess: %s >>> pending sent: %d", c, m.msgId)
-					m.sent = sentTime
-				}
-			}
+func (c *session) sendPendingInBatches(ctx context.Context, gatewayId string, pendings []*outboxMsg, sentTime int64) {
+	const split = 16
+
+	fullBatches := len(pendings) / split
+	for i := 0; i < fullBatches; i++ {
+		start := i * split
+		end := start + split
+		batch := pendings[start:end]
+		if !c.sendPendingBatch(ctx, gatewayId, batch, sentTime) {
+			continue
 		}
-		if (len(pendings) % split) > 0 {
-			msgContainer := &mtproto.TLMsgRawDataContainer{
-				Messages: make([]*mtproto.TLMessageRawData, 0, split),
-			}
-			for _, m := range pendings[split*(len(pendings)/split):] {
-				msgContainer.Messages = append(msgContainer.Messages, m.msg)
-			}
-			logx.WithContext(ctx).Infof("sess: %s >>> sendRawDirectToGateway - TLMsgRawDataContainer", c)
-			b, err = c.sendDirectToGateway(ctx, gatewayId, false, msgContainer, func(sentRaw *mtproto.TLMessageRawData) {
-				// TODO(@benqi):
-				// nothing do
-			})
-			// log.Debugf("err: %v, b: %v", err, b)
-			if err != nil || !b {
-				return
-			}
-			for _, m := range pendings[split*(len(pendings)/split):] {
-				if m.state == NEED_NO_ACK {
-					logx.WithContext(ctx).Infof("sess: %s >>> need_no_ack: %d", c, m.msgId)
-					c.outQueue.Remove(m.msgId)
-				} else {
-					logx.WithContext(ctx).Infof("sess: %s >>> pending sent: %d", c, m.msgId)
-					m.sent = sentTime
-				}
-			}
+	}
+
+	if rem := len(pendings) % split; rem > 0 {
+		start := split * fullBatches
+		batch := pendings[start:]
+		_ = c.sendPendingBatch(ctx, gatewayId, batch, sentTime)
+	}
+}
+
+func (c *session) sendPendingBatch(ctx context.Context, gatewayId string, batch []*outboxMsg, sentTime int64) bool {
+	msgContainer := &mtproto.TLMsgRawDataContainer{
+		Messages: make([]*mtproto.TLMessageRawData, 0, len(batch)),
+	}
+	for _, m := range batch {
+		msgContainer.Messages = append(msgContainer.Messages, m.msg)
+	}
+
+	logx.WithContext(ctx).Infof("sess: %s >>> sendRawDirectToGateway - TLMsgRawDataContainer", c)
+	ok, err := c.sendDirectToGateway(ctx, gatewayId, false, msgContainer, func(sentRaw *mtproto.TLMessageRawData) {
+		// nothing to do
+	})
+	if err != nil || !ok {
+		return false
+	}
+
+	c.updatePendingStates(ctx, batch, sentTime)
+	return true
+}
+
+func (c *session) updatePendingStates(ctx context.Context, pendings []*outboxMsg, sentTime int64) {
+	for _, m := range pendings {
+		if m.state == NEED_NO_ACK {
+			logx.WithContext(ctx).Infof("sess: %s >>> need_no_ack: %d", c, m.msgId)
+			c.outQueue.Remove(m.msgId)
+			continue
 		}
+
+		logx.WithContext(ctx).Infof("sess: %s >>> pending sent: %d", c, m.msgId)
+		m.sent = sentTime
 	}
 }

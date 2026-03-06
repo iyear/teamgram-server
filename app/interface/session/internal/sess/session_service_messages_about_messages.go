@@ -29,6 +29,8 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
+const detailedInfoThreshold = 4096
+
 func (c *session) onMsgsAck(ctx context.Context, gatewayId string, msgId int64, seqno int32, request *mtproto.TLMsgsAck) {
 	logx.WithContext(ctx).Infof("onMsgsAck - request data: {sess: %s, gatewayId: %s, msg_id: %d, seq_no: %d, request: {%s}}",
 		c,
@@ -70,15 +72,14 @@ func (c *session) checkBadServerSalt(ctx context.Context, gatewayId string, salt
 
 	valid := false
 
-	if salt == c.sessList.cacheSalt.GetSalt() {
+	if c.sessList.cacheSalt != nil && salt == c.sessList.cacheSalt.GetSalt() {
 		valid = true
-	} else {
-		if c.sessList.cacheSalt != nil {
-			if salt == c.sessList.cacheSalt.GetSalt() {
-				date := int32(time.Now().Unix())
-				if c.sessList.cacheSalt.GetValidUntil()+300 >= date {
-					valid = true
-				}
+	} else if c.sessList.cacheLastSalt != nil {
+		// Accept the previous salt within a 300s grace period after its valid_until.
+		if salt == c.sessList.cacheLastSalt.GetSalt() {
+			date := int32(time.Now().Unix())
+			if c.sessList.cacheLastSalt.GetValidUntil()+300 >= date {
+				valid = true
 			}
 		}
 	}
@@ -317,8 +318,11 @@ func (c *session) checkBadMsgNotification(ctx context.Context, gatewayId string,
 		}
 
 		if msg.MsgId < c.inQueue.GetMinMsgId() {
-			// errorCode = kMsgIdTooOld
-			// break
+			// Use upper 32 bits (time) to check if the message is too old (>300s).
+			if clientTime+300 < serverTime {
+				errorCode = kMsgIdTooOld
+				break
+			}
 		}
 
 		//// TODO(@benqi): check kSeqNoTooHigh and kSeqNoTooLow
@@ -616,9 +620,18 @@ func (c *session) onMsgsStateInfo(ctx context.Context, gatewayId string, msgId *
 		}
 	})
 
-	// TODO(@benqi): resend
-	if len(resendIds) > 0 {
-		//
+	// Resend messages that the peer reported as NOT_RECEIVED.
+	if len(resendIds) > 0 && gatewayId != "" {
+		sentTime := time.Now().Unix()
+		for _, id := range resendIds {
+			if o := c.outQueue.Lookup(id); o != nil && o.msg != nil {
+				if ok, err := c.sendRawDirectToGateway(ctx, gatewayId, o.msg); err != nil || !ok {
+					logx.WithContext(ctx).Errorf("onMsgsStateInfo - resend msg_id %d failed: %v", id, err)
+					continue
+				}
+				o.sent = sentTime
+			}
+		}
 	}
 
 	// 2. no ack
@@ -673,9 +686,18 @@ func (c *session) onMsgsAllInfo(ctx context.Context, gatewayId string, msgId *in
 		}
 	})
 
-	// TODO(@benqi): resend
-	if len(resendIds) > 0 {
-		//
+	// Resend messages that the peer voluntarily reported as NOT_RECEIVED.
+	if len(resendIds) > 0 && gatewayId != "" {
+		sentTime := time.Now().Unix()
+		for _, id := range resendIds {
+			if o := c.outQueue.Lookup(id); o != nil && o.msg != nil {
+				if ok, err := c.sendRawDirectToGateway(ctx, gatewayId, o.msg); err != nil || !ok {
+					logx.WithContext(ctx).Errorf("onMsgsAllInfo - resend msg_id %d failed: %v", id, err)
+					continue
+				}
+				o.sent = sentTime
+			}
+		}
 	}
 
 	// 2. no ack
@@ -753,9 +775,19 @@ func (c *session) onMsgResendReq(ctx context.Context, gatewayId string, msgId *i
 
 		c.sendRawToQueue(ctx, gatewayId, msgId.msgId, false, msgsStateInfo)
 		msgId.state = RECEIVED | NEED_NO_ACK
-	} else {
+	} else if gatewayId != "" {
+		// 请求的所有 msg_id 都在本端当前窗口内，尝试重发这些消息。
+		sentTime := time.Now().Unix()
 		for i := 0; i < len(msgIds); i++ {
-			// resend
+			o := c.outQueue.Lookup(msgIds[i])
+			if o == nil || o.msg == nil {
+				continue
+			}
+			if ok, err := c.sendRawDirectToGateway(ctx, gatewayId, o.msg); err != nil || !ok {
+				logx.WithContext(ctx).Errorf("onMsgResendReq - resend msg_id %d failed: %v", msgIds[i], err)
+				continue
+			}
+			o.sent = sentTime
 		}
 	}
 }
@@ -819,7 +851,24 @@ func (c *session) notifyMsgsAllInfo() {
 // Currently, status is always zero. This may change in future.
 //
 // This message does not require an acknowledgment.
-func (c *session) notifyMsgDetailedInfo(inMsg *inboxMsg) {
+func (c *session) notifyMsgDetailedInfo(ctx context.Context, gatewayId string, inMsg *inboxMsg, oMsg *outboxMsg) {
+	if gatewayId == "" || inMsg == nil || oMsg == nil || oMsg.msg == nil {
+		return
+	}
+
+	detail := mtproto.MakeTLMsgDetailedInfo(&mtproto.MsgDetailedInfo{
+		MsgId:       inMsg.msgId,
+		AnswerMsgId: oMsg.msg.MsgId,
+		Bytes:       oMsg.msg.Bytes,
+		Status:      0,
+	}).To_MsgDetailedInfo()
+
+	_, err := c.sendDirectToGateway(ctx, gatewayId, false, detail, func(sentRaw *mtproto.TLMessageRawData) {
+		// nothing to do
+	})
+	if err != nil {
+		logx.WithContext(ctx).Errorf("notifyMsgDetailedInfo - send failed for msg_id %d: %v", inMsg.msgId, err)
+	}
 }
 
 func (c *session) notifyNewMsgDetailedInfo() {

@@ -8,6 +8,7 @@ package sess
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -27,6 +28,11 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 	"github.com/zeromicro/go-zero/core/syncx"
 	"github.com/zeromicro/go-zero/core/threading"
+)
+
+var (
+	// ErrDataChannelFull sessionDataChan 缓冲满时返回此错误，让调用方感知背压
+	ErrDataChannelFull = errors.New("session data channel is full")
 )
 
 type SessionList struct {
@@ -69,7 +75,10 @@ func (s *SessionList) Reset(authId int64) (lastAuthId int64) {
 
 func (s *SessionList) destroySession(sessionId int64) bool {
 	// TODO(@benqi):
-	if _, ok := s.sessions[sessionId]; ok {
+	if sess, ok := s.sessions[sessionId]; ok {
+		if sess.httpQueue != nil {
+			sess.httpQueue.Clear()
+		}
 		// s.updates.onGenericSessionClose(sess)
 		delete(s.sessions, sessionId)
 	} else {
@@ -123,8 +132,8 @@ func NewMainAuthWrapper(mainAuthKeyId int64, authUserId int64, state int, client
 		nextPushId:           0,
 		nextNotifyId:         math.MaxInt32,
 		closeChan:            make(chan struct{}),
-		sessionDataChan:      make(chan interface{}, 1024),
-		rpcDataChan:          make(chan interface{}, 1024),
+		sessionDataChan:      make(chan interface{}, 4096),
+		rpcDataChan:          make(chan interface{}, 4096),
 		rpcQueue:             queue2.NewSyncQueue(),
 		finish:               sync.WaitGroup{},
 		running:              syncx.NewAtomicBool(),
@@ -161,7 +170,14 @@ func (m *MainAuthWrapper) changeAuthState(ctx context.Context, state int, stateD
 	case mtproto.AuthStateNeedPassword:
 		m.AuthUserId = stateData.(int64)
 	case mtproto.AuthStateNormal:
-		m.AuthUserId = stateData.(int64)
+		newUserId := stateData.(int64)
+		if m.AuthUserId != 0 && m.AuthUserId != newUserId {
+			// 一条 authKey 生命周期内出现多个 userId，视为异常：打高危日志但保留旧值，避免 owner 悄然漂移。
+			logx.WithContext(ctx).Errorf("changeAuthState - authKeyId %d switch user from %d to %d, keep original",
+				m.authKeyId, m.AuthUserId, newUserId)
+			return
+		}
+		m.AuthUserId = newUserId
 	default:
 		m.AuthUserId = 0
 	}
@@ -525,7 +541,7 @@ func (m *MainAuthWrapper) String() string {
 
 func (m *MainAuthWrapper) Start() {
 	m.running.Set(true)
-	m.finish.Add(1)
+	m.finish.Add(2)
 	go m.rpcRunLoop()
 	go m.runLoop()
 }
@@ -544,7 +560,7 @@ func (m *MainAuthWrapper) runLoop() {
 		m.finish.Done()
 		m.rpcQueue.Close()
 		close(m.closeChan)
-		close(m.sessionDataChan)
+		// Do not close sessionDataChan here to avoid panics from senders writing to a closed channel.
 		m.finish.Wait()
 	}()
 
@@ -613,6 +629,7 @@ func (m *MainAuthWrapper) runLoop() {
 
 func (m *MainAuthWrapper) rpcRunLoop() {
 	defer func() {
+		m.finish.Done()
 		close(m.rpcDataChan)
 	}()
 	for {
@@ -701,10 +718,11 @@ func (m *MainAuthWrapper) SessionClientNew(ctx context.Context, kType int, kId i
 
 	select {
 	case m.sessionDataChan <- cData:
+		return nil
 	default:
+		logx.WithContext(ctx).Errorf("sessionDataChan full, dropping SessionClientNew (authKeyId:%d, sessionId:%d)", kId, sessionId)
+		return ErrDataChannelFull
 	}
-
-	return nil
 }
 
 func (m *MainAuthWrapper) SessionDataArrived(ctx context.Context, kType int, kId int64, gatewayId, clientIp string, sessionId, salt int64, buf []byte) error {
@@ -723,10 +741,11 @@ func (m *MainAuthWrapper) SessionDataArrived(ctx context.Context, kType int, kId
 
 	select {
 	case m.sessionDataChan <- sData:
+		return nil
 	default:
+		logx.WithContext(ctx).Errorf("sessionDataChan full, dropping SessionDataArrived (authKeyId:%d, sessionId:%d)", kId, sessionId)
+		return ErrDataChannelFull
 	}
-
-	return nil
 }
 
 func (m *MainAuthWrapper) SessionHttpDataArrived(ctx context.Context, kType int, kId int64, gatewayId, clientIp string, sessionId, salt int64, buf []byte, resChan chan interface{}) error {
@@ -746,10 +765,11 @@ func (m *MainAuthWrapper) SessionHttpDataArrived(ctx context.Context, kType int,
 
 	select {
 	case m.sessionDataChan <- sData:
+		return nil
 	default:
+		logx.WithContext(ctx).Errorf("sessionDataChan full, dropping SessionHttpDataArrived (authKeyId:%d, sessionId:%d)", kId, sessionId)
+		return ErrDataChannelFull
 	}
-
-	return nil
 }
 
 func (m *MainAuthWrapper) SessionClientClosed(ctx context.Context, kType int, kId int64, gatewayId string, sessionId int64) error {
@@ -766,10 +786,11 @@ func (m *MainAuthWrapper) SessionClientClosed(ctx context.Context, kType int, kI
 
 	select {
 	case m.sessionDataChan <- cData:
+		return nil
 	default:
+		logx.WithContext(ctx).Errorf("sessionDataChan full, dropping SessionClientClosed (authKeyId:%d, sessionId:%d)", kId, sessionId)
+		return ErrDataChannelFull
 	}
-
-	return nil
 }
 
 func (m *MainAuthWrapper) SyncRpcResultDataArrived(ctx context.Context, kId int64, sessionId, clientMsgId int64, data []byte) error {
@@ -786,10 +807,11 @@ func (m *MainAuthWrapper) SyncRpcResultDataArrived(ctx context.Context, kId int6
 
 	select {
 	case m.sessionDataChan <- rData:
+		return nil
 	default:
+		logx.WithContext(ctx).Errorf("sessionDataChan full, dropping SyncRpcResultDataArrived (authKeyId:%d, sessionId:%d)", kId, sessionId)
+		return ErrDataChannelFull
 	}
-
-	return nil
 }
 
 func (m *MainAuthWrapper) SyncSessionDataArrived(ctx context.Context, kId int64, sessionId int64, updates *mtproto.Updates) error {
@@ -805,10 +827,11 @@ func (m *MainAuthWrapper) SyncSessionDataArrived(ctx context.Context, kId int64,
 
 	select {
 	case m.sessionDataChan <- sData:
+		return nil
 	default:
+		logx.WithContext(ctx).Errorf("sessionDataChan full, dropping SyncSessionDataArrived (authKeyId:%d, sessionId:%d)", kId, sessionId)
+		return ErrDataChannelFull
 	}
-
-	return nil
 }
 
 func (m *MainAuthWrapper) SyncDataArrived(ctx context.Context, needAndroidPush bool, updates *mtproto.Updates) error {
@@ -822,10 +845,11 @@ func (m *MainAuthWrapper) SyncDataArrived(ctx context.Context, needAndroidPush b
 
 	select {
 	case m.sessionDataChan <- sData:
+		return nil
 	default:
+		logx.WithContext(ctx).Errorf("sessionDataChan full, dropping SyncDataArrived (authKeyId:%d)", m.authKeyId)
+		return ErrDataChannelFull
 	}
-
-	return nil
 }
 
 func (m *MainAuthWrapper) onSessionNew(ctx context.Context, connMsg *connData) {
@@ -860,7 +884,9 @@ func (m *MainAuthWrapper) onSessionData(ctx context.Context, sessionMsg *session
 	}
 
 	message2 := new(mtproto.TLMessage2)
-	err := message2.Decode(mtproto.NewDecodeBuf(sessionMsg.buf))
+	dBuf := mtproto.GetDecodeBuf(sessionMsg.buf)
+	err := message2.Decode(dBuf)
+	mtproto.PutDecodeBuf(dBuf)
 	if err != nil {
 		// TODO(@benqi): close frontend conn??
 		logx.WithContext(ctx).Errorf("onSessionData - error: {%s}, data: {sessions: %s, gate_id: %d}", err, m, sessionMsg.gatewayId)
@@ -892,46 +918,46 @@ func (m *MainAuthWrapper) onSessionData(ctx context.Context, sessionMsg *session
 }
 
 func (m *MainAuthWrapper) onSessionHttpData(ctx context.Context, sessionMsg *sessionHttpData) {
-	//sList := m.getSessionList(sessionMsg.authType)
-	//
-	//if sList.authId == 0 {
-	//	m.resetAuth(sessionMsg.authType, sessionMsg.authId)
-	//} else if sList.authId != sessionMsg.authId {
-	//	m.resetAuth(sessionMsg.authType, sessionMsg.authId)
-	//}
-	//
-	//message2 := new(mtproto.TLMessage2)
-	//err := message2.Decode(mtproto.NewDecodeBuf(sessionMsg.buf))
-	//if err != nil {
-	//	// TODO(@benqi): close frontend conn??
-	//	logx.WithContext(ctx).Errorf("onSessionHttpData - error: {%s}, data: {sessions: %s, gate_id: %d}", err, m, sessionMsg.gatewayId)
-	//	return
-	//}
-	//
-	//// TODO(@benqi): load onNew
-	//if sList.cacheSalt == nil {
-	//	sList.cacheSalt, sList.cacheLastSalt, _ = m.cb.Dao.GetOrFetchNewSalt(ctx, sList.authId)
-	//} else {
-	//	if int32(time.Now().Unix()) >= sList.cacheSalt.GetValidUntil() {
-	//		sList.cacheSalt, sList.cacheLastSalt, _ = m.cb.Dao.GetOrFetchNewSalt(ctx, sList.authId)
-	//	}
-	//}
-	//
-	//if sList.cacheSalt == nil {
-	//	logx.WithContext(ctx).Infof("onSessionHttpData - getOrFetchNewSalt nil error, data: {sessions: %s, conn_id: %s}", m, sessionMsg.gatewayId)
-	//	return
-	//}
-	//
-	//sess, ok := sList.sessions[sessionMsg.sessionId]
-	//if !ok {
-	//	sess = newSession(sessionMsg.sessionId, sList)
-	//	sList.sessions[sessionMsg.sessionId] = sess
-	//}
-	//
-	//sess.isHttp = true
-	//sess.httpQueue.Push(sessionMsg.resChannel)
-	//sess.onSessionConnNew(ctx, sessionMsg.gatewayId)
-	//sess.onSessionMessageData(ctx, sessionMsg.gatewayId, sessionMsg.clientIp, sessionMsg.salt, message2)
+	sList := m.getSessionList(sessionMsg.authType)
+
+	if sList.authId == 0 {
+		m.resetAuth(sessionMsg.authType, sessionMsg.authId)
+	} else if sList.authId != sessionMsg.authId {
+		m.resetAuth(sessionMsg.authType, sessionMsg.authId)
+	}
+
+	message2 := new(mtproto.TLMessage2)
+	dBuf := mtproto.GetDecodeBuf(sessionMsg.buf)
+	err := message2.Decode(dBuf)
+	mtproto.PutDecodeBuf(dBuf)
+	if err != nil {
+		// TODO(@benqi): close frontend conn??
+		logx.WithContext(ctx).Errorf("onSessionHttpData - error: {%s}, data: {sessions: %s, gate_id: %s}", err, m, sessionMsg.gatewayId)
+		return
+	}
+
+	// Load or refresh salt.
+	if sList.cacheSalt == nil {
+		sList.cacheSalt, sList.cacheLastSalt, _ = m.cb.Dao.GetOrFetchNewSalt(ctx, sList.authId)
+	} else if int32(time.Now().Unix()) >= sList.cacheSalt.GetValidUntil() {
+		sList.cacheSalt, sList.cacheLastSalt, _ = m.cb.Dao.GetOrFetchNewSalt(ctx, sList.authId)
+	}
+
+	if sList.cacheSalt == nil {
+		logx.WithContext(ctx).Infof("onSessionHttpData - getOrFetchNewSalt nil error, data: {sessions: %s, conn_id: %s}", m, sessionMsg.gatewayId)
+		return
+	}
+
+	sess, ok := sList.sessions[sessionMsg.sessionId]
+	if !ok {
+		sess = newSession(sessionMsg.sessionId, sList)
+		sList.sessions[sessionMsg.sessionId] = sess
+	}
+
+	sess.isHttp = true
+	sess.httpQueue.Push(sessionMsg.resChannel)
+	sess.onSessionConnNew(ctx, sessionMsg.gatewayId)
+	sess.onSessionMessageData(ctx, sessionMsg.gatewayId, sessionMsg.clientIp, sessionMsg.salt, message2)
 }
 
 func (m *MainAuthWrapper) onSessionClosed(ctx context.Context, connMsg *connData) {

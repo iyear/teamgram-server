@@ -18,6 +18,7 @@ package codec
 import (
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 
 	"github.com/teamgram/proto/mtproto"
 )
@@ -33,8 +34,17 @@ import (
 // and 4 CRC32 bytes at the end (length, sequence number, and payload together).
 //
 
-// FullCodec FullCodec
+// FullCodec implements the MTProto full TCP transport.
+// As per https://core.telegram.org/mtproto#tcp-transport, each packet has
+// length(4) + seqno(4) + payload + crc32(4), where length covers the whole
+// packet, seqno is a per‑connection sequence number, and crc32 validates
+// length+seqno+payload.
+//
+// In this implementation FullCodec runs over plain TCP and is mainly used
+// for compatibility with clients that only support the full transport.
 type FullCodec struct {
+	recvSeqNo int32
+	sendSeqNo int32
 }
 
 func newMTProtoFullCodec() *FullCodec {
@@ -46,69 +56,79 @@ func (c *FullCodec) Encode(conn CodecWriter, msg interface{}) ([]byte, error) {
 	rawMsg, ok := msg.(*mtproto.MTPRawMessage)
 	if !ok {
 		err := fmt.Errorf("msg type error, only MTPRawMessage, msg: {%v}", msg)
-		// log.Error(err.Error())
 		return nil, err
 	}
 
-	b := rawMsg.Payload
+	payload := rawMsg.Payload
+	totalLen := 4 + 4 + len(payload) + 4 // length + seqno + payload + crc32
 
-	sb := make([]byte, 8)
-	// minus padding
-	size := len(b) / 4
+	buf := make([]byte, totalLen)
+	binary.LittleEndian.PutUint32(buf, uint32(totalLen))
+	binary.LittleEndian.PutUint32(buf[4:], uint32(c.sendSeqNo))
+	c.sendSeqNo++
+	copy(buf[8:], payload)
+	// CRC32 of (length + seqno + payload)
+	checksum := crc32.ChecksumIEEE(buf[:8+len(payload)])
+	binary.LittleEndian.PutUint32(buf[8+len(payload):], checksum)
 
-	binary.LittleEndian.PutUint32(sb, uint32(size))
-	// TODO(@benqi): gen seq_num
-	var seqNum uint32 = 0
-	binary.LittleEndian.PutUint32(sb[4:], seqNum)
-	b = append(sb, b...)
-	var crc32Buf = make([]byte, 4)
-	var crc32 uint32 = 0
-	binary.LittleEndian.PutUint32(crc32Buf, crc32)
-	b = append(sb, crc32Buf...)
-
-	return b, nil
+	return buf, nil
 }
+
+// EncodeQuickAck returns nil: the full transport does not support Quick ACK.
+func (c *FullCodec) EncodeQuickAck(_ uint32) []byte { return nil }
 
 // Decode decodes frames from TCP stream via specific implementation.
 func (c *FullCodec) Decode(conn CodecReader) (bool, []byte, error) {
 	var (
-		size int
-		buf  []byte
-		n    int
-		in   innerBuffer
-		err  error
+		in  innerBuffer
+		buf []byte
+		err error
 	)
 
 	in, _ = conn.Peek(-1)
 
+	// Read 4-byte length header
 	if buf, err = in.readN(4); err != nil {
 		return false, nil, ErrUnexpectedEOF
 	}
-	size += 4
 
-	n = int(binary.LittleEndian.Uint32(buf))
-	// Check bufLen
-	if n < 12 {
-		err = fmt.Errorf("invalid len: %d", size)
-		return false, nil, err
+	totalLen := int(binary.LittleEndian.Uint32(buf))
+	// Minimum: 4 (length) + 4 (seqno) + 4 (crc32) = 12
+	if totalLen < 12 {
+		return false, nil, fmt.Errorf("%w: full codec: invalid total length: %d", ErrProtoBadLength, totalLen)
+	}
+	if totalLen > MAX_MTPRORO_FRAME_SIZE {
+		return false, nil, fmt.Errorf("%w: full codec: too large data(%d)", ErrProtoBadLength, totalLen)
 	}
 
-	if buf, err = in.readN(n); err != nil {
+	// Read remaining bytes: seqno + payload + crc32
+	remainLen := totalLen - 4
+	if buf, err = in.readN(remainLen); err != nil {
 		return false, nil, ErrUnexpectedEOF
 	}
-	size += n
-	_, _ = conn.Discard(size)
+	_, _ = conn.Discard(totalLen)
 
-	seq := binary.LittleEndian.Uint32(buf[:4])
-	// TODO(@benqi): check seqNum, save last seq_num
-	_ = seq
+	// Validate CRC32: checksum covers length(4) + seqno(4) + payload
+	payloadEnd := len(buf) - 4
+	recvCrc := binary.LittleEndian.Uint32(buf[payloadEnd:])
+	// Build the data to checksum: length header + seqno + payload
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(totalLen))
+	h := crc32.NewIEEE()
+	_, _ = h.Write(lenBuf[:])
+	_, _ = h.Write(buf[:payloadEnd])
+	calcCrc := h.Sum32()
+	if recvCrc != calcCrc {
+		return false, nil, fmt.Errorf("%w: full codec: crc32 mismatch: received 0x%08x, calculated 0x%08x", ErrProtoBadCRC, recvCrc, calcCrc)
+	}
 
-	crc32 := binary.LittleEndian.Uint32(buf[len(buf)-4:])
-	// TODO(@benqi): check crc32
-	_ = crc32
+	// Validate sequence number
+	seq := int32(binary.LittleEndian.Uint32(buf[:4]))
+	if seq != c.recvSeqNo {
+		return false, nil, fmt.Errorf("%w: full codec: seq mismatch: received %d, expected %d", ErrProtoBadSeq, seq, c.recvSeqNo)
+	}
+	c.recvSeqNo++
 
-	// message := mtproto.NewMTPRawMessage(int64(binary.LittleEndian.Uint64(buf[4:])), 0, TRANSPORT_TCP)
-	// _ = message.Decode(buf)
-
-	return false, buf, nil
+	// Payload is between seqno and crc32
+	return false, buf[4:payloadEnd], nil
 }

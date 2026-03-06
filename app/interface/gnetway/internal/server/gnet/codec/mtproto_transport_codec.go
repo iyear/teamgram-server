@@ -15,7 +15,6 @@ import (
 
 	"github.com/teamgram/proto/mtproto/crypto"
 
-	"github.com/valyala/bytebufferpool"
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
@@ -98,13 +97,26 @@ var (
 	Err0x02010316NotSupport = errors.New("0x02010316 transport not support")
 )
 
+// Protocol-level errors that help callers distinguish between
+// client-side protocol violations and internal server failures.
 var (
-	isMTProto    bool // 是否使用MTProto - true为官方mtproto协议，false为定制协议（当前实现为ntproto）
-	isObfuscated bool
+	// ErrProtoBadMagic 表示首包 magic / obfuscated 协议头与预期不符。
+	ErrProtoBadMagic = errors.New("mtproto: bad transport magic")
+	// ErrProtoBadLength 表示长度字段非法（<=0、超出限制或不满足对齐要求）。
+	ErrProtoBadLength = errors.New("mtproto: bad frame length")
+	// ErrProtoBadCRC 表示 full transport 下 CRC32 校验失败。
+	ErrProtoBadCRC = errors.New("mtproto: bad crc32")
+	// ErrProtoBadSeq 表示 full transport 下 seqno 不连续。
+	ErrProtoBadSeq = errors.New("mtproto: bad sequence number")
+	// ErrProtoDecrypt 表示 AES 解密或 obfuscated 握手阶段出错。
+	ErrProtoDecrypt = errors.New("mtproto: decrypt failed")
+	// ErrTransportNotSupported 表示客户端选择了当前服务端未实现的 transport 方式。
+	ErrTransportNotSupported = errors.New("mtproto: transport not supported")
 )
 
 var (
-	xBufPool = bytebufferpool.Pool{}
+	isMTProto    bool // 是否使用MTProto - true为官方mtproto协议，false为定制协议（当前实现为ntproto）
+	isObfuscated bool
 )
 
 func init() {
@@ -114,6 +126,9 @@ func init() {
 
 // var ErrShortBuffer = io.ErrShortBuffer
 
+// CodecReader exposes a read-only view of the underlying connection.
+// Implementations are expected to reuse the underlying buffer between calls,
+// so callers must not retain the returned slice beyond the next read.
 type CodecReader interface {
 	// Peek returns the next n bytes without advancing the reader. The bytes stop
 	// being valid at the next read call. If Peek returns fewer than n bytes, it
@@ -134,15 +149,29 @@ type CodecReader interface {
 	Discard(n int) (discarded int, err error)
 }
 
+// CodecWriter is a placeholder for future write-side helpers.
+// Currently Encode returns a complete frame and the caller writes it to the connection.
 type CodecWriter interface {
 }
 
+// Codec represents one MTProto TCP transport mode (abridged, intermediate,
+// padded intermediate, full, or an obfuscated wrapper around them).
+// A single Codec instance is created per connection during the handshake phase.
 type Codec interface {
 	Encode(conn CodecWriter, msg interface{}) ([]byte, error)
 	Decode(conn CodecReader) (bool, []byte, error)
-	// FirstBytes() int
+	// EncodeQuickAck encodes a 4-byte Quick ACK token for the transport.
+	// For abridged transport, the token bytes are swapped (big-endian on the wire)
+	// per the MTProto spec. For intermediate/padded-intermediate, the token is sent
+	// as little-endian. In both cases the result is passed through the CTR cipher
+	// (if the connection uses an obfuscated transport).
+	// Returns nil if Quick ACK is not supported by the transport (e.g. full codec).
+	EncodeQuickAck(token uint32) []byte
 }
 
+// CreateCodec chooses either the official MTProto transports or the custom
+// ntproto variant based on global flags, and performs the initial handshake
+// and transport detection on the underlying connection.
 func CreateCodec(conn CodecReader) (Codec, error) {
 	if isMTProto {
 		return CreateMTProtoCodec(conn)
@@ -151,6 +180,10 @@ func CreateCodec(conn CodecReader) (Codec, error) {
 	}
 }
 
+// CreateMTProtoCodec inspects the first bytes from the connection and selects
+// the appropriate MTProto TCP transport (HTTP, full, abridged, intermediate,
+// padded intermediate, or obfuscated). For obfuscated transports it also
+// performs the 64‑byte handshake and derives per-connection AES‑CTR keys.
 func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 	rData, _ := conn.Peek(-1)
 	if len(rData) == 0 {
@@ -162,11 +195,9 @@ func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 		var (
 			firstByte uint8
 		)
-		// bytes, _ := conn.Peek(1)
 		firstByte = rData[0]
 
 		if firstByte == ABRIDGED_FLAG {
-			// tB, _ := conn.Peek(-1)
 			logx.Debugf("conn(%s) mtproto abridged version, data: %s", conn, hex.EncodeToString(rData))
 			_, _ = conn.Discard(1)
 			return newMTProtoAbridgedCodec(nil), nil
@@ -211,16 +242,16 @@ func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 		return newMTProtoPaddedIntermediateCodec(nil), nil
 	}
 
-	// check PVrG
+	// check PVrG (non‑standard transport, explicitly marked as unsupported)
 	if firstInt == PVRG_FLAG {
 		logx.Errorf("conn(%s) PVrG version. data: %s", conn, hex.EncodeToString(rData))
-		return nil, ErrPvrgNotSupport
+		return nil, fmt.Errorf("%w: PVrG version", ErrTransportNotSupported)
 	}
 
 	// check 0x02010316
 	if firstInt == UNKNOWN_FLAG {
 		logx.Errorf("conn(%s) firstInt is 0x02010316. data: %s", conn, hex.EncodeToString(rData))
-		return nil, Err0x02010316NotSupport
+		return nil, fmt.Errorf("%w: 0x02010316 version", ErrTransportNotSupported)
 	}
 
 	if len(rData) < 12 {
@@ -229,15 +260,6 @@ func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 	}
 
 	checkFullBuf := rData[:12]
-	//var (
-	//	checkFullBuf []byte
-	//)
-	//
-	//if bytes, err = conn.Peek(12); err != nil {
-	//	return nil, ErrUnexpectedEOF
-	//} else {
-	//	checkFullBuf = bytes
-	//}
 
 	secondInt := binary.BigEndian.Uint32(checkFullBuf[4:])
 	if secondInt == FULL_FLAG {
@@ -280,12 +302,12 @@ func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 
 	e, err := crypto.NewAesCTR128Encrypt(tmp[:32], tmp[32:48])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: create decrypt crypto failed", ErrProtoDecrypt)
 	}
 
 	d, err := crypto.NewAesCTR128Encrypt(obfuscatedBuf[8:40], obfuscatedBuf[40:56])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: create encrypt crypto failed", ErrProtoDecrypt)
 	}
 
 	d.Encrypt(obfuscatedBuf)
@@ -294,13 +316,16 @@ func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 	if protocolType != ABRIDGED_INT32_FLAG &&
 		protocolType != INTERMEDIATE_FLAG &&
 		protocolType != PADDED_INTERMEDIATE_FLAG {
-		return nil, fmt.Errorf("conn(%s) mtproto buf[56:60]'s byte != 0xef, received: %s",
+		return nil, fmt.Errorf("%w: conn(%s) mtproto buf[56:60] invalid, received: %s",
+			ErrProtoBadMagic,
 			conn,
 			hex.EncodeToString(rData))
 	}
 
 	dcId := int16(binary.BigEndian.Uint16(obfuscatedBuf[60:]))
-	// TODO: check dcId
+	if dcId == 0 {
+		return nil, fmt.Errorf("%w: invalid dc id: %d", ErrProtoBadMagic, dcId)
+	}
 
 	//if secondInt == PROXY_FLAG {
 	//	c.remoteIp = ip.IntToIP(firstInt)
@@ -312,6 +337,9 @@ func CreateMTProtoCodec(conn CodecReader) (Codec, error) {
 	return newMTProtoObfuscatedCodec(d, e, protocolType, dcId), nil
 }
 
+// CreateMyProtoCodec parses the custom ntproto obfuscated header.
+// The layout is similar to MTProto obfuscated transports, but uses different
+// byte offsets for key/iv derivation and for protocolType/dcId.
 func CreateMyProtoCodec(conn CodecReader) (Codec, error) {
 	// 5. app version.
 
@@ -352,13 +380,13 @@ func CreateMyProtoCodec(conn CodecReader) (Codec, error) {
 
 	e, err := crypto.NewAesCTR128Encrypt(tmp[:32], tmp[32:48])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: create decrypt crypto failed", ErrProtoDecrypt)
 	}
 
 	// d, err := crypto.NewAesCTR128Encrypt(obfuscatedBuf[8:40], obfuscatedBuf[40:56])
 	d, err := crypto.NewAesCTR128Encrypt(obfuscatedBuf[16:48], obfuscatedBuf[48:64])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: create encrypt crypto failed", ErrProtoDecrypt)
 	}
 
 	d.Encrypt(obfuscatedBuf)
@@ -368,14 +396,17 @@ func CreateMyProtoCodec(conn CodecReader) (Codec, error) {
 	if protocolType != ABRIDGED_INT32_FLAG &&
 		protocolType != INTERMEDIATE_FLAG &&
 		protocolType != PADDED_INTERMEDIATE_FLAG {
-		return nil, fmt.Errorf("conn(%s) mtproto buf[8:12]'s byte != 0xef, received: %s",
+		return nil, fmt.Errorf("%w: conn(%s) mtproto buf[8:12] invalid, received: %s",
+			ErrProtoBadMagic,
 			conn,
 			hex.EncodeToString(obfuscatedBuf[8:12]))
 	}
 
 	// dcId := int16(binary.BigEndian.Uint16(obfuscatedBuf[60:]))
 	dcId := int16(binary.BigEndian.Uint16(obfuscatedBuf[12:]))
-	// TODO: check dcId
+	if dcId == 0 {
+		return nil, fmt.Errorf("%w: invalid dc id: %d", ErrProtoBadMagic, dcId)
+	}
 
 	_, _ = conn.Discard(64)
 

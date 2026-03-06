@@ -39,6 +39,5 @@ message TL_gateway_sendDataToGateway {
 // rpc
 
 service RPCGateway {
-  rpc gateway_sendDataToGateway(TL_gateway_sendDataToGateway)
-      returns (mtproto.Bool) {}
+  rpc gateway_sendDataToGateway(TL_gateway_sendDataToGateway) returns (mtproto.Bool) {}
 }

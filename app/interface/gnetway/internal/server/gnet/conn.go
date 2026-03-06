@@ -10,6 +10,7 @@ import (
 	"bytes"
 
 	"github.com/teamgram/teamgram-server/app/interface/gnetway/internal/server/gnet/codec"
+	httpcodec "github.com/teamgram/teamgram-server/app/interface/gnetway/internal/server/gnet/http"
 	"github.com/teamgram/teamgram-server/app/interface/gnetway/internal/server/gnet/ws"
 
 	"github.com/zeromicro/go-zero/core/jsonx"
@@ -41,7 +42,9 @@ type connContext struct {
 	clientIp   string
 	tcp        bool
 	websocket  bool
+	http       bool
 	wsCodec    *ws.WsCodec
+	httpCodec  *httpcodec.HttpCodec
 	logx.Logger
 	newSession bool
 	nextSeqNo  int32
@@ -88,6 +91,14 @@ func (ctx *connContext) getHandshakeStateCtx(nonce []byte) *HandshakeStateCtx {
 	return nil
 }
 
+const maxHandshakes = 3
+
 func (ctx *connContext) putHandshakeStateCt(state *HandshakeStateCtx) {
+	if len(ctx.handshakes) >= maxHandshakes {
+		// Evict oldest handshake to prevent unbounded growth
+		copy(ctx.handshakes, ctx.handshakes[1:])
+		ctx.handshakes[len(ctx.handshakes)-1] = state
+		return
+	}
 	ctx.handshakes = append(ctx.handshakes, state)
 }
