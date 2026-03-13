@@ -1,4 +1,4 @@
-// Copyright 2025 Teamgram Authors
+// Copyright (c) 2026 The Teamgram Authors (https://teamgram.net).
 //  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,31 +14,18 @@
 // limitations under the License.
 //
 // Author: teamgramio (teamgram.io@gmail.com)
-//
 
 package core
 
 import (
-	"context"
-
-	"github.com/teamgram/proto/mtproto/rpc/metadata"
-	"github.com/teamgram/teamgram-server/app/messenger/msg/msgtransfer/internal/svc"
-
-	"github.com/zeromicro/go-zero/core/logx"
+	"github.com/teamgram/proto/mtproto"
 )
 
-type MsgtransferCore struct {
-	ctx    context.Context
-	svcCtx *svc.ServiceContext
-	logx.Logger
-	MD *metadata.RpcMetadata
-}
+// MessagesGetFutureChatCreatorAfterLeave
+// messages.getFutureChatCreatorAfterLeave#3b7d0ea6 peer:InputPeer = User;
+func (c *ChatsCore) MessagesGetFutureChatCreatorAfterLeave(in *mtproto.TLMessagesGetFutureChatCreatorAfterLeave) (*mtproto.User, error) {
+	// TODO: not impl
+	c.Logger.Errorf("messages.getFutureChatCreatorAfterLeave blocked, License key from https://teamgram.net required to unlock enterprise features.")
 
-func New(ctx context.Context, svcCtx *svc.ServiceContext) *MsgtransferCore {
-	return &MsgtransferCore{
-		ctx:    ctx,
-		svcCtx: svcCtx,
-		Logger: logx.WithContext(ctx),
-		MD:     metadata.RpcMetadataFromIncoming(ctx),
-	}
+	return nil, mtproto.ErrEnterpriseIsBlocked
 }

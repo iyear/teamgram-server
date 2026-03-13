@@ -220,6 +220,16 @@ func (d *Dao) sendMessageToOutbox(ctx context.Context, fromId int64, peer *mtpro
 				}
 			}
 		}
+
+		_, err = d.AddToPtsQueueTx(tx, fromId, pts, 1, mtproto.MakeTLUpdateNewMessage(&mtproto.Update{
+			Message_MESSAGE: outMsgBox.Message,
+			Pts_INT32:       pts,
+			PtsCount:        1,
+		}).To_Update())
+		if err != nil {
+			result.Err = err
+			return
+		}
 	})
 
 	if tR.Err != nil {
@@ -264,7 +274,7 @@ func (d *Dao) sendMessageToOutbox(ctx context.Context, fromId int64, peer *mtpro
 		}
 
 		// dup, we'll recreate box
-		do, err := d.MessagesDAO.SelectByRandomId(ctx, fromId, outboxMessage.RandomId)
+		do, err := d.MessagesDAO.SelectByRandomId(ctx, d.MessagesDAO.CalcTableName(fromId), fromId, outboxMessage.RandomId)
 		if err != nil {
 			return nil, false, err
 		}
@@ -573,6 +583,16 @@ func (d *Dao) DeletePhoneCallHistory(ctx context.Context, userId int64) ([]int32
 }
 
 func (d *Dao) SendMessageToOutboxV1(ctx context.Context, fromId int64, peer *mtproto.PeerUtil, outMsgBox *mtproto.MessageBox) error {
+	return d.sendMessageToOutboxV1(ctx, fromId, peer, outMsgBox, true)
+}
+
+// SendMessageToOutboxV1NoPts writes the outbox message to DB without writing
+// user_pts_updates (caller is responsible for pts persistence).
+func (d *Dao) SendMessageToOutboxV1NoPts(ctx context.Context, fromId int64, peer *mtproto.PeerUtil, outMsgBox *mtproto.MessageBox) error {
+	return d.sendMessageToOutboxV1(ctx, fromId, peer, outMsgBox, false)
+}
+
+func (d *Dao) sendMessageToOutboxV1(ctx context.Context, fromId int64, peer *mtproto.PeerUtil, outMsgBox *mtproto.MessageBox, writePts bool) error {
 	message := outMsgBox.Message
 	mData, _ := jsonx.Marshal(outMsgBox.GetMessage())
 	outBoxMsgId := outMsgBox.MessageId
@@ -626,6 +646,18 @@ func (d *Dao) SendMessageToOutboxV1(ctx context.Context, fromId int64, peer *mtp
 						HashTagMessageId: outMsgBox.MessageId,
 					})
 				}
+			}
+		}
+
+		if writePts {
+			_, err = d.AddToPtsQueueTx(tx, fromId, outMsgBox.Pts, outMsgBox.PtsCount, mtproto.MakeTLUpdateNewMessage(&mtproto.Update{
+				Message_MESSAGE: outMsgBox.Message,
+				Pts_INT32:       outMsgBox.Pts,
+				PtsCount:        outMsgBox.PtsCount,
+			}).To_Update())
+			if err != nil {
+				result.Err = err
+				return
 			}
 		}
 	})
@@ -722,6 +754,18 @@ func (d *Dao) sendMessageToOutboxV2(ctx context.Context, fromId int64, peer *mtp
 		TtlPeriod:         0,
 		HasReaction:       false,
 	}).To_MessageBox()
+
+	// Write sender's user_pts_updates before RPC return to guarantee
+	// getDifference completeness for the sender.
+	if out && pts > 0 {
+		if _, err = d.AddToPtsQueueE(ctx, fromId, pts, 1, mtproto.MakeTLUpdateNewMessage(&mtproto.Update{
+			Message_MESSAGE: message,
+			Pts_INT32:       pts,
+			PtsCount:        1,
+		}).To_Update()); err != nil {
+			logx.WithContext(ctx).Errorf("sendMessageToOutboxV2 - AddToPtsQueueE error, user_id: %d, pts: %d, err: %v", fromId, pts, err)
+		}
+	}
 
 	return outMsgBox, nil
 }
@@ -822,24 +866,16 @@ func (d *Dao) editOutboxMessageV2(ctx context.Context, fromId int64, peerType in
 		err := mtproto.ErrInternalServerError
 		return nil, err
 	}
-	//if _, err := d.MessagesDAO.UpdateEditMessage(ctx, string(mData), message.Message, fromId, message.Id); err != nil {
-	//	return nil, err
-	//}
 
-	//// d.HashTagsDAO.DeleteHashTagMessageId(ctx, fromId, message.Id)
-	//for _, entity := range message.GetEntities() {
-	//	if entity.GetPredicateName() == mtproto.Predicate_messageEntityHashtag {
-	//		if entity.GetUrl() != "" {
-	//			d.HashTagsDAO.InsertOrUpdate(ctx, &dataobject.HashTagsDO{
-	//				UserId:           fromId,
-	//				PeerType:         peerType,
-	//				PeerId:           peerId,
-	//				HashTag:          entity.GetUrl(),
-	//				HashTagMessageId: dstMessage.MessageId,
-	//			})
-	//		}
-	//	}
-	//}
+	// Write sender's user_pts_updates before RPC return to guarantee
+	// getDifference completeness for the sender.
+	if _, err := d.AddToPtsQueueE(ctx, fromId, pts, ptsCount, mtproto.MakeTLUpdateEditMessage(&mtproto.Update{
+		Message_MESSAGE: message,
+		Pts_INT32:       pts,
+		PtsCount:        ptsCount,
+	}).To_Update()); err != nil {
+		logx.WithContext(ctx).Errorf("editOutboxMessageV2 - AddToPtsQueueE error, user_id: %d, pts: %d, err: %v", fromId, pts, err)
+	}
 
 	return mtproto.MakeTLMessageBox(&mtproto.MessageBox{
 		UserId:            dstMessage.UserId,

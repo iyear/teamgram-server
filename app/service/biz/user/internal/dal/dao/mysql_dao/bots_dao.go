@@ -23,11 +23,6 @@ import (
 	"github.com/zeromicro/go-zero/core/logx"
 )
 
-var _ *sql.Result
-var _ = fmt.Sprintf
-var _ = strings.Join
-var _ = errors.Is
-
 type BotsDAO struct {
 	db *sqlx.DB
 }
@@ -42,9 +37,11 @@ func NewBotsDAO(db *sqlx.DB) *BotsDAO {
 // select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id = :bot_id
 func (dao *BotsDAO) Select(ctx context.Context, botId int64) (rValue *dataobject.BotsDO, err error) {
 	var (
-		query = "select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id = ?"
+		query string
 		do    = &dataobject.BotsDO{}
 	)
+	query = "select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id = ?"
+
 	err = dao.db.QueryRowPartial(ctx, do, query, botId)
 
 	if err != nil {
@@ -52,6 +49,7 @@ func (dao *BotsDAO) Select(ctx context.Context, botId int64) (rValue *dataobject
 			logx.WithContext(ctx).Errorf("queryx in Select(_), error: %v", err)
 			return
 		} else {
+			// not found not error, return nil, nil
 			err = nil
 		}
 	} else {
@@ -64,7 +62,9 @@ func (dao *BotsDAO) Select(ctx context.Context, botId int64) (rValue *dataobject
 // SelectByToken
 // select bot_id from bots where token = :token
 func (dao *BotsDAO) SelectByToken(ctx context.Context, token string) (rValue int64, err error) {
-	var query = "select bot_id from bots where token = ?"
+	var query string
+	query = "select bot_id from bots where token = ?"
+
 	err = dao.db.QueryRowPartial(ctx, &rValue, query, token)
 
 	if err != nil {
@@ -72,6 +72,7 @@ func (dao *BotsDAO) SelectByToken(ctx context.Context, token string) (rValue int
 			logx.WithContext(ctx).Errorf("get in SelectByToken(_), error: %v", err)
 			return
 		} else {
+			// not found not error, return nil, nil
 			err = nil
 		}
 	}
@@ -82,14 +83,16 @@ func (dao *BotsDAO) SelectByToken(ctx context.Context, token string) (rValue int
 // SelectByIdList
 // select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id in (:id_list)
 func (dao *BotsDAO) SelectByIdList(ctx context.Context, idList []int32) (rList []dataobject.BotsDO, err error) {
-	var (
-		query  = fmt.Sprintf("select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id in (%s)", sqlx.InInt32List(idList))
-		values []dataobject.BotsDO
-	)
 	if len(idList) == 0 {
 		rList = []dataobject.BotsDO{}
 		return
 	}
+
+	var (
+		query  string
+		values []dataobject.BotsDO
+	)
+	query = fmt.Sprintf("select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id in (%s)", sqlx.InInt32List(idList))
 
 	err = dao.db.QueryRowsPartial(ctx, &values, query)
 
@@ -106,14 +109,16 @@ func (dao *BotsDAO) SelectByIdList(ctx context.Context, idList []int32) (rList [
 // SelectByIdListWithCB
 // select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id in (:id_list)
 func (dao *BotsDAO) SelectByIdListWithCB(ctx context.Context, idList []int32, cb func(sz, i int, v *dataobject.BotsDO)) (rList []dataobject.BotsDO, err error) {
-	var (
-		query  = fmt.Sprintf("select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id in (%s)", sqlx.InInt32List(idList))
-		values []dataobject.BotsDO
-	)
 	if len(idList) == 0 {
 		rList = []dataobject.BotsDO{}
 		return
 	}
+
+	var (
+		query  string
+		values []dataobject.BotsDO
+	)
+	query = fmt.Sprintf("select id, bot_id, bot_type, creator_user_id, token, description, bot_chat_history, bot_nochats, bot_inline_geo, bot_info_version, bot_inline_placeholder, attach_menu_enabled, bot_attach_menu, bot_business, bot_has_main_app, bot_active_users, has_menu_button, menu_button_text, menu_button_url, bot_can_edit, has_preview_medias, description_photo_id, description_document_id, main_app_url, has_app_settings, placeholder_path, background_color, background_dark_color, header_color, header_dark_color, privacy_policy_url from bots where bot_id in (%s)", sqlx.InInt32List(idList))
 
 	err = dao.db.QueryRowsPartial(ctx, &values, query)
 
@@ -126,7 +131,7 @@ func (dao *BotsDAO) SelectByIdListWithCB(ctx context.Context, idList []int32, cb
 
 	if cb != nil {
 		sz := len(rList)
-		for i := 0; i < sz; i++ {
+		for i := range sz {
 			cb(sz, i, &rList[i])
 		}
 	}
@@ -145,9 +150,10 @@ func (dao *BotsDAO) Update(ctx context.Context, cMap map[string]interface{}, bot
 	}
 
 	var (
-		query   = fmt.Sprintf("update bots set %s where bot_id = ?", strings.Join(names, ", "))
+		query   string
 		rResult sql.Result
 	)
+	query = fmt.Sprintf("update bots set %s where bot_id = ?", strings.Join(names, ", "))
 
 	aValues = append(aValues, botId)
 
@@ -177,9 +183,10 @@ func (dao *BotsDAO) UpdateTx(tx *sqlx.Tx, cMap map[string]interface{}, botId int
 	}
 
 	var (
-		query   = fmt.Sprintf("update bots set %s where bot_id = ?", strings.Join(names, ", "))
+		query   string
 		rResult sql.Result
 	)
+	query = fmt.Sprintf("update bots set %s where bot_id = ?", strings.Join(names, ", "))
 
 	aValues = append(aValues, botId)
 

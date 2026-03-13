@@ -1,4 +1,4 @@
-// Copyright 2025 Teamgram Authors
+// Copyright (c) 2026 The Teamgram Authors (https://teamgram.net).
 //  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,23 +14,18 @@
 // limitations under the License.
 //
 // Author: teamgramio (teamgram.io@gmail.com)
-//
 
-package svc
+package core
 
 import (
-	"github.com/teamgram/teamgram-server/app/messenger/msg/msgtransfer/internal/config"
-	"github.com/teamgram/teamgram-server/app/messenger/msg/msgtransfer/internal/dao"
+	"github.com/teamgram/proto/mtproto"
 )
 
-type ServiceContext struct {
-	Config config.Config
-	*dao.Dao
-}
+// MessagesEditChatCreator
+// messages.editChatCreator#f743b857 peer:InputPeer user_id:InputUser password:InputCheckPasswordSRP = Updates;
+func (c *ChatsCore) MessagesEditChatCreator(in *mtproto.TLMessagesEditChatCreator) (*mtproto.Updates, error) {
+	// TODO: not impl
+	c.Logger.Errorf("messages.editChatCreator blocked, License key from https://teamgram.net required to unlock enterprise features.")
 
-func NewServiceContext(c config.Config) *ServiceContext {
-	return &ServiceContext{
-		Config: c,
-		Dao:    dao.New(c),
-	}
+	return nil, mtproto.ErrEnterpriseIsBlocked
 }

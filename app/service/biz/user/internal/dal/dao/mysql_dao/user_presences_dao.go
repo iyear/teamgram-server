@@ -15,18 +15,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/teamgram/marmota/pkg/stores/sqlx"
 	"github.com/teamgram/teamgram-server/app/service/biz/user/internal/dal/dataobject"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )
-
-var _ *sql.Result
-var _ = fmt.Sprintf
-var _ = strings.Join
-var _ = errors.Is
 
 type UserPresencesDAO struct {
 	db *sqlx.DB
@@ -42,9 +36,10 @@ func NewUserPresencesDAO(db *sqlx.DB) *UserPresencesDAO {
 // insert into user_presences(user_id, last_seen_at, expires) values (:user_id, :last_seen_at, :expires) on duplicate key update last_seen_at = values(last_seen_at), expires = values(expires)
 func (dao *UserPresencesDAO) InsertOrUpdate(ctx context.Context, do *dataobject.UserPresencesDO) (lastInsertId, rowsAffected int64, err error) {
 	var (
-		query = "insert into user_presences(user_id, last_seen_at, expires) values (:user_id, :last_seen_at, :expires) on duplicate key update last_seen_at = values(last_seen_at), expires = values(expires)"
+		query string
 		r     sql.Result
 	)
+	query = "insert into user_presences(user_id, last_seen_at, expires) values (:user_id, :last_seen_at, :expires) on duplicate key update last_seen_at = values(last_seen_at), expires = values(expires)"
 
 	r, err = dao.db.NamedExec(ctx, query, do)
 	if err != nil {
@@ -54,12 +49,12 @@ func (dao *UserPresencesDAO) InsertOrUpdate(ctx context.Context, do *dataobject.
 
 	lastInsertId, err = r.LastInsertId()
 	if err != nil {
-		logx.WithContext(ctx).Errorf("lastInsertId in InsertOrUpdate(%v)_error: %v", do, err)
+		logx.WithContext(ctx).Errorf("lastInsertId in InsertOrUpdate(%v), error: %v", do, err)
 		return
 	}
 	rowsAffected, err = r.RowsAffected()
 	if err != nil {
-		logx.WithContext(ctx).Errorf("rowsAffected in InsertOrUpdate(%v)_error: %v", do, err)
+		logx.WithContext(ctx).Errorf("rowsAffected in InsertOrUpdate(%v), error: %v", do, err)
 	}
 
 	return
@@ -69,9 +64,10 @@ func (dao *UserPresencesDAO) InsertOrUpdate(ctx context.Context, do *dataobject.
 // insert into user_presences(user_id, last_seen_at, expires) values (:user_id, :last_seen_at, :expires) on duplicate key update last_seen_at = values(last_seen_at), expires = values(expires)
 func (dao *UserPresencesDAO) InsertOrUpdateTx(tx *sqlx.Tx, do *dataobject.UserPresencesDO) (lastInsertId, rowsAffected int64, err error) {
 	var (
-		query = "insert into user_presences(user_id, last_seen_at, expires) values (:user_id, :last_seen_at, :expires) on duplicate key update last_seen_at = values(last_seen_at), expires = values(expires)"
+		query string
 		r     sql.Result
 	)
+	query = "insert into user_presences(user_id, last_seen_at, expires) values (:user_id, :last_seen_at, :expires) on duplicate key update last_seen_at = values(last_seen_at), expires = values(expires)"
 
 	r, err = tx.NamedExec(query, do)
 	if err != nil {
@@ -81,12 +77,12 @@ func (dao *UserPresencesDAO) InsertOrUpdateTx(tx *sqlx.Tx, do *dataobject.UserPr
 
 	lastInsertId, err = r.LastInsertId()
 	if err != nil {
-		logx.WithContext(tx.Context()).Errorf("lastInsertId in InsertOrUpdate(%v)_error: %v", do, err)
+		logx.WithContext(tx.Context()).Errorf("lastInsertId in InsertOrUpdate(%v), error: %v", do, err)
 		return
 	}
 	rowsAffected, err = r.RowsAffected()
 	if err != nil {
-		logx.WithContext(tx.Context()).Errorf("rowsAffected in InsertOrUpdate(%v)_error: %v", do, err)
+		logx.WithContext(tx.Context()).Errorf("rowsAffected in InsertOrUpdate(%v), error: %v", do, err)
 	}
 
 	return
@@ -96,9 +92,11 @@ func (dao *UserPresencesDAO) InsertOrUpdateTx(tx *sqlx.Tx, do *dataobject.UserPr
 // select id, user_id, last_seen_at, expires from user_presences where user_id = :user_id
 func (dao *UserPresencesDAO) Select(ctx context.Context, userId int64) (rValue *dataobject.UserPresencesDO, err error) {
 	var (
-		query = "select id, user_id, last_seen_at, expires from user_presences where user_id = ?"
+		query string
 		do    = &dataobject.UserPresencesDO{}
 	)
+	query = "select id, user_id, last_seen_at, expires from user_presences where user_id = ?"
+
 	err = dao.db.QueryRowPartial(ctx, do, query, userId)
 
 	if err != nil {
@@ -106,6 +104,7 @@ func (dao *UserPresencesDAO) Select(ctx context.Context, userId int64) (rValue *
 			logx.WithContext(ctx).Errorf("queryx in Select(_), error: %v", err)
 			return
 		} else {
+			// not found not error, return nil, nil
 			err = nil
 		}
 	} else {
@@ -118,14 +117,16 @@ func (dao *UserPresencesDAO) Select(ctx context.Context, userId int64) (rValue *
 // SelectList
 // select id, user_id, last_seen_at, expires from user_presences where user_id in (:idList)
 func (dao *UserPresencesDAO) SelectList(ctx context.Context, idList []int64) (rList []dataobject.UserPresencesDO, err error) {
-	var (
-		query  = fmt.Sprintf("select id, user_id, last_seen_at, expires from user_presences where user_id in (%s)", sqlx.InInt64List(idList))
-		values []dataobject.UserPresencesDO
-	)
 	if len(idList) == 0 {
 		rList = []dataobject.UserPresencesDO{}
 		return
 	}
+
+	var (
+		query  string
+		values []dataobject.UserPresencesDO
+	)
+	query = fmt.Sprintf("select id, user_id, last_seen_at, expires from user_presences where user_id in (%s)", sqlx.InInt64List(idList))
 
 	err = dao.db.QueryRowsPartial(ctx, &values, query)
 
@@ -142,14 +143,16 @@ func (dao *UserPresencesDAO) SelectList(ctx context.Context, idList []int64) (rL
 // SelectListWithCB
 // select id, user_id, last_seen_at, expires from user_presences where user_id in (:idList)
 func (dao *UserPresencesDAO) SelectListWithCB(ctx context.Context, idList []int64, cb func(sz, i int, v *dataobject.UserPresencesDO)) (rList []dataobject.UserPresencesDO, err error) {
-	var (
-		query  = fmt.Sprintf("select id, user_id, last_seen_at, expires from user_presences where user_id in (%s)", sqlx.InInt64List(idList))
-		values []dataobject.UserPresencesDO
-	)
 	if len(idList) == 0 {
 		rList = []dataobject.UserPresencesDO{}
 		return
 	}
+
+	var (
+		query  string
+		values []dataobject.UserPresencesDO
+	)
+	query = fmt.Sprintf("select id, user_id, last_seen_at, expires from user_presences where user_id in (%s)", sqlx.InInt64List(idList))
 
 	err = dao.db.QueryRowsPartial(ctx, &values, query)
 
@@ -162,7 +165,7 @@ func (dao *UserPresencesDAO) SelectListWithCB(ctx context.Context, idList []int6
 
 	if cb != nil {
 		sz := len(rList)
-		for i := 0; i < sz; i++ {
+		for i := range sz {
 			cb(sz, i, &rList[i])
 		}
 	}
@@ -174,9 +177,10 @@ func (dao *UserPresencesDAO) SelectListWithCB(ctx context.Context, idList []int6
 // update user_presences set last_seen_at = :last_seen_at, expires = :expires where user_id = :user_id
 func (dao *UserPresencesDAO) UpdateLastSeenAt(ctx context.Context, lastSeenAt int64, expires int32, userId int64) (rowsAffected int64, err error) {
 	var (
-		query   = "update user_presences set last_seen_at = ?, expires = ? where user_id = ?"
+		query   string
 		rResult sql.Result
 	)
+	query = "update user_presences set last_seen_at = ?, expires = ? where user_id = ?"
 
 	rResult, err = dao.db.Exec(ctx, query, lastSeenAt, expires, userId)
 
@@ -197,9 +201,11 @@ func (dao *UserPresencesDAO) UpdateLastSeenAt(ctx context.Context, lastSeenAt in
 // update user_presences set last_seen_at = :last_seen_at, expires = :expires where user_id = :user_id
 func (dao *UserPresencesDAO) UpdateLastSeenAtTx(tx *sqlx.Tx, lastSeenAt int64, expires int32, userId int64) (rowsAffected int64, err error) {
 	var (
-		query   = "update user_presences set last_seen_at = ?, expires = ? where user_id = ?"
+		query   string
 		rResult sql.Result
 	)
+	query = "update user_presences set last_seen_at = ?, expires = ? where user_id = ?"
+
 	rResult, err = tx.Exec(query, lastSeenAt, expires, userId)
 
 	if err != nil {

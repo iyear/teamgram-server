@@ -46,22 +46,34 @@ func (c *InboxCore) InboxSendUserMessageToInboxV2(in *inbox.TLInboxSendUserMessa
 			isUseV3 = true
 		}
 
-		//boxList := in.GetBoxList()
 		for _, inBox := range in.GetBoxList() {
 			if isUseV3 {
+				// V3: pts allocated here in inbox consumer
 				inBox.Pts = c.svcCtx.Dao.IDGenClient2.NextPtsId(c.ctx, in.FromId)
 				inBox.PtsCount = 1
-			}
 
-			err := c.svcCtx.Dao.SendMessageToOutboxV1(
-				c.ctx,
-				in.FromId,
-				mtproto.MakePeerUtil(in.PeerType, in.PeerId),
-				inBox)
-			if err != nil {
-				// TODO: handle error
-				c.Logger.Errorf("inbox.sendUserMessageToInboxV2 - error: %v", err)
-				return nil, err
+				// V3: write outbox + user_pts_updates together (pts allocated above)
+				err := c.svcCtx.Dao.SendMessageToOutboxV1(
+					c.ctx,
+					in.FromId,
+					mtproto.MakePeerUtil(in.PeerType, in.PeerId),
+					inBox)
+				if err != nil {
+					c.Logger.Errorf("inbox.sendUserMessageToInboxV2 - error: %v", err)
+					return nil, err
+				}
+			} else {
+				// V2: user_pts_updates already written by msg service before RPC return,
+				// only write outbox message to DB here (skip pts write to avoid duplicates).
+				err := c.svcCtx.Dao.SendMessageToOutboxV1NoPts(
+					c.ctx,
+					in.FromId,
+					mtproto.MakePeerUtil(in.PeerType, in.PeerId),
+					inBox)
+				if err != nil {
+					c.Logger.Errorf("inbox.sendUserMessageToInboxV2 - error: %v", err)
+					return nil, err
+				}
 			}
 
 			// TODO: handle sendToSelfUser
@@ -83,18 +95,23 @@ func (c *InboxCore) InboxSendUserMessageToInboxV2(in *inbox.TLInboxSendUserMessa
 				}
 			}
 
-			_, err = c.svcCtx.Dao.SyncClient.SyncUpdatesNotMe(c.ctx, &sync.TLSyncUpdatesNotMe{
+			updateNewMessage := mtproto.MakeTLUpdateNewMessage(&mtproto.Update{
+				Message_MESSAGE: inBox.GetMessage(),
+				Pts_INT32:       inBox.Pts,
+				PtsCount:        inBox.PtsCount,
+			}).To_Update()
+
+			_, err := c.svcCtx.Dao.SyncClient.SyncUpdatesNotMe(c.ctx, &sync.TLSyncUpdatesNotMe{
 				UserId:        inBox.UserId,
 				PermAuthKeyId: in.FromAuthKeyId,
 				Updates: mtproto.MakeUpdatesByUpdatesUsersChats(
 					in.Users,
 					in.Chats,
-					mtproto.MakeTLUpdateNewMessage(&mtproto.Update{
-						Message_MESSAGE: inBox.GetMessage(),
-						Pts_INT32:       inBox.Pts,
-						PtsCount:        inBox.PtsCount,
-					}).To_Update()),
+					updateNewMessage),
 			})
+			if err != nil {
+				c.Logger.Errorf("inbox.sendUserMessageToInboxV2 - SyncUpdatesNotMe error: %v", err)
+			}
 		}
 
 		if isUseV3 {
@@ -188,14 +205,16 @@ func (c *InboxCore) InboxSendUserMessageToInboxV2(in *inbox.TLInboxSendUserMessa
 				//}
 			}
 
+			updateNewMessage := mtproto.MakeTLUpdateNewMessage(&mtproto.Update{
+				Message_MESSAGE: inBox.GetMessage(),
+				Pts_INT32:       inBox.Pts,
+				PtsCount:        inBox.PtsCount,
+			}).To_Update()
+
 			pushUpdates := mtproto.MakeUpdatesByUpdatesUsersChats(
 				in.Users,
 				in.Chats,
-				mtproto.MakeTLUpdateNewMessage(&mtproto.Update{
-					Message_MESSAGE: inBox.GetMessage(),
-					Pts_INT32:       inBox.Pts,
-					PtsCount:        inBox.PtsCount,
-				}).To_Update())
+				updateNewMessage)
 
 			if in.PeerType == mtproto.PEER_CHAT {
 				switch inBox.GetMessage().GetAction().GetPredicateName() {
@@ -215,14 +234,16 @@ func (c *InboxCore) InboxSendUserMessageToInboxV2(in *inbox.TLInboxSendUserMessa
 							Date2:           nil,
 						})
 
-					pushUpdates.PushFrontUpdate(mtproto.MakeTLUpdateReadHistoryInbox(&mtproto.Update{
+					updateReadHistoryInbox := mtproto.MakeTLUpdateReadHistoryInbox(&mtproto.Update{
 						FolderId:         nil,
 						Peer_PEER:        mtproto.MakePeerChat(in.PeerId),
 						MaxId:            inBox.MessageId,
 						StillUnreadCount: 0,
 						Pts_INT32:        c.svcCtx.Dao.NextPtsId(c.ctx, in.UserId),
 						PtsCount:         1,
-					}).To_Update())
+					}).To_Update()
+					c.persistPtsUpdate(c.ctx, in.UserId, updateReadHistoryInbox)
+					pushUpdates.PushFrontUpdate(updateReadHistoryInbox)
 				}
 			}
 
@@ -236,6 +257,8 @@ func (c *InboxCore) InboxSendUserMessageToInboxV2(in *inbox.TLInboxSendUserMessa
 					break
 				}
 			}
+
+			c.persistPtsUpdate(c.ctx, inBox.UserId, updateNewMessage)
 
 			if isBot {
 				if c.svcCtx.Dao.BotSyncClient != nil {

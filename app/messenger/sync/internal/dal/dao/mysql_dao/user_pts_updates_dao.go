@@ -14,19 +14,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"strings"
 
 	"github.com/teamgram/marmota/pkg/stores/sqlx"
 	"github.com/teamgram/teamgram-server/app/messenger/sync/internal/dal/dataobject"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )
-
-var _ *sql.Result
-var _ = fmt.Sprintf
-var _ = strings.Join
-var _ = errors.Is
 
 type UserPtsUpdatesDAO struct {
 	db *sqlx.DB
@@ -42,9 +35,10 @@ func NewUserPtsUpdatesDAO(db *sqlx.DB) *UserPtsUpdatesDAO {
 // insert into user_pts_updates(user_id, pts, pts_count, update_type, update_data, date2) values (:user_id, :pts, :pts_count, :update_type, :update_data, :date2)
 func (dao *UserPtsUpdatesDAO) Insert(ctx context.Context, do *dataobject.UserPtsUpdatesDO) (lastInsertId, rowsAffected int64, err error) {
 	var (
-		query = "insert into user_pts_updates(user_id, pts, pts_count, update_type, update_data, date2) values (:user_id, :pts, :pts_count, :update_type, :update_data, :date2)"
+		query string
 		r     sql.Result
 	)
+	query = "insert into user_pts_updates(user_id, pts, pts_count, update_type, update_data, date2) values (:user_id, :pts, :pts_count, :update_type, :update_data, :date2)"
 
 	r, err = dao.db.NamedExec(ctx, query, do)
 	if err != nil {
@@ -54,12 +48,12 @@ func (dao *UserPtsUpdatesDAO) Insert(ctx context.Context, do *dataobject.UserPts
 
 	lastInsertId, err = r.LastInsertId()
 	if err != nil {
-		logx.WithContext(ctx).Errorf("lastInsertId in Insert(%v)_error: %v", do, err)
+		logx.WithContext(ctx).Errorf("lastInsertId in Insert(%v), error: %v", do, err)
 		return
 	}
 	rowsAffected, err = r.RowsAffected()
 	if err != nil {
-		logx.WithContext(ctx).Errorf("rowsAffected in Insert(%v)_error: %v", do, err)
+		logx.WithContext(ctx).Errorf("rowsAffected in Insert(%v), error: %v", do, err)
 	}
 
 	return
@@ -69,9 +63,10 @@ func (dao *UserPtsUpdatesDAO) Insert(ctx context.Context, do *dataobject.UserPts
 // insert into user_pts_updates(user_id, pts, pts_count, update_type, update_data, date2) values (:user_id, :pts, :pts_count, :update_type, :update_data, :date2)
 func (dao *UserPtsUpdatesDAO) InsertTx(tx *sqlx.Tx, do *dataobject.UserPtsUpdatesDO) (lastInsertId, rowsAffected int64, err error) {
 	var (
-		query = "insert into user_pts_updates(user_id, pts, pts_count, update_type, update_data, date2) values (:user_id, :pts, :pts_count, :update_type, :update_data, :date2)"
+		query string
 		r     sql.Result
 	)
+	query = "insert into user_pts_updates(user_id, pts, pts_count, update_type, update_data, date2) values (:user_id, :pts, :pts_count, :update_type, :update_data, :date2)"
 
 	r, err = tx.NamedExec(query, do)
 	if err != nil {
@@ -81,12 +76,12 @@ func (dao *UserPtsUpdatesDAO) InsertTx(tx *sqlx.Tx, do *dataobject.UserPtsUpdate
 
 	lastInsertId, err = r.LastInsertId()
 	if err != nil {
-		logx.WithContext(tx.Context()).Errorf("lastInsertId in Insert(%v)_error: %v", do, err)
+		logx.WithContext(tx.Context()).Errorf("lastInsertId in Insert(%v), error: %v", do, err)
 		return
 	}
 	rowsAffected, err = r.RowsAffected()
 	if err != nil {
-		logx.WithContext(tx.Context()).Errorf("rowsAffected in Insert(%v)_error: %v", do, err)
+		logx.WithContext(tx.Context()).Errorf("rowsAffected in Insert(%v), error: %v", do, err)
 	}
 
 	return
@@ -96,9 +91,11 @@ func (dao *UserPtsUpdatesDAO) InsertTx(tx *sqlx.Tx, do *dataobject.UserPtsUpdate
 // select pts from user_pts_updates where user_id = :user_id order by pts desc limit 1
 func (dao *UserPtsUpdatesDAO) SelectLastPts(ctx context.Context, userId int64) (rValue *dataobject.UserPtsUpdatesDO, err error) {
 	var (
-		query = "select pts from user_pts_updates where user_id = ? order by pts desc limit 1"
+		query string
 		do    = &dataobject.UserPtsUpdatesDO{}
 	)
+	query = "select pts from user_pts_updates where user_id = ? order by pts desc limit 1"
+
 	err = dao.db.QueryRowPartial(ctx, do, query, userId)
 
 	if err != nil {
@@ -106,6 +103,7 @@ func (dao *UserPtsUpdatesDAO) SelectLastPts(ctx context.Context, userId int64) (
 			logx.WithContext(ctx).Errorf("queryx in SelectLastPts(_), error: %v", err)
 			return
 		} else {
+			// not found not error, return nil, nil
 			err = nil
 		}
 	} else {
@@ -119,9 +117,11 @@ func (dao *UserPtsUpdatesDAO) SelectLastPts(ctx context.Context, userId int64) (
 // select user_id, pts, pts_count, update_type, update_data from user_pts_updates where user_id = :user_id and pts > :pts order by pts asc
 func (dao *UserPtsUpdatesDAO) SelectByGtPts(ctx context.Context, userId int64, pts int32) (rList []dataobject.UserPtsUpdatesDO, err error) {
 	var (
-		query  = "select user_id, pts, pts_count, update_type, update_data from user_pts_updates where user_id = ? and pts > ? order by pts asc"
+		query  string
 		values []dataobject.UserPtsUpdatesDO
 	)
+	query = "select user_id, pts, pts_count, update_type, update_data from user_pts_updates where user_id = ? and pts > ? order by pts asc"
+
 	err = dao.db.QueryRowsPartial(ctx, &values, query, userId, pts)
 
 	if err != nil {
@@ -138,9 +138,11 @@ func (dao *UserPtsUpdatesDAO) SelectByGtPts(ctx context.Context, userId int64, p
 // select user_id, pts, pts_count, update_type, update_data from user_pts_updates where user_id = :user_id and pts > :pts order by pts asc
 func (dao *UserPtsUpdatesDAO) SelectByGtPtsWithCB(ctx context.Context, userId int64, pts int32, cb func(sz, i int, v *dataobject.UserPtsUpdatesDO)) (rList []dataobject.UserPtsUpdatesDO, err error) {
 	var (
-		query  = "select user_id, pts, pts_count, update_type, update_data from user_pts_updates where user_id = ? and pts > ? order by pts asc"
+		query  string
 		values []dataobject.UserPtsUpdatesDO
 	)
+	query = "select user_id, pts, pts_count, update_type, update_data from user_pts_updates where user_id = ? and pts > ? order by pts asc"
+
 	err = dao.db.QueryRowsPartial(ctx, &values, query, userId, pts)
 
 	if err != nil {
@@ -152,7 +154,7 @@ func (dao *UserPtsUpdatesDAO) SelectByGtPtsWithCB(ctx context.Context, userId in
 
 	if cb != nil {
 		sz := len(rList)
-		for i := 0; i < sz; i++ {
+		for i := range sz {
 			cb(sz, i, &rList[i])
 		}
 	}

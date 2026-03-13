@@ -14,19 +14,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"strings"
 
 	"github.com/teamgram/marmota/pkg/stores/sqlx"
 	"github.com/teamgram/teamgram-server/app/service/biz/user/internal/dal/dataobject"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )
-
-var _ *sql.Result
-var _ = fmt.Sprintf
-var _ = strings.Join
-var _ = errors.Is
 
 type DefaultHistoryTtlDAO struct {
 	db *sqlx.DB
@@ -42,9 +35,10 @@ func NewDefaultHistoryTtlDAO(db *sqlx.DB) *DefaultHistoryTtlDAO {
 // insert into default_history_ttl(user_id, period) values (:user_id, :period) on duplicate key update period = values(period)
 func (dao *DefaultHistoryTtlDAO) InsertOrUpdate(ctx context.Context, do *dataobject.DefaultHistoryTtlDO) (lastInsertId, rowsAffected int64, err error) {
 	var (
-		query = "insert into default_history_ttl(user_id, period) values (:user_id, :period) on duplicate key update period = values(period)"
+		query string
 		r     sql.Result
 	)
+	query = "insert into default_history_ttl(user_id, period) values (:user_id, :period) on duplicate key update period = values(period)"
 
 	r, err = dao.db.NamedExec(ctx, query, do)
 	if err != nil {
@@ -54,12 +48,12 @@ func (dao *DefaultHistoryTtlDAO) InsertOrUpdate(ctx context.Context, do *dataobj
 
 	lastInsertId, err = r.LastInsertId()
 	if err != nil {
-		logx.WithContext(ctx).Errorf("lastInsertId in InsertOrUpdate(%v)_error: %v", do, err)
+		logx.WithContext(ctx).Errorf("lastInsertId in InsertOrUpdate(%v), error: %v", do, err)
 		return
 	}
 	rowsAffected, err = r.RowsAffected()
 	if err != nil {
-		logx.WithContext(ctx).Errorf("rowsAffected in InsertOrUpdate(%v)_error: %v", do, err)
+		logx.WithContext(ctx).Errorf("rowsAffected in InsertOrUpdate(%v), error: %v", do, err)
 	}
 
 	return
@@ -69,9 +63,10 @@ func (dao *DefaultHistoryTtlDAO) InsertOrUpdate(ctx context.Context, do *dataobj
 // insert into default_history_ttl(user_id, period) values (:user_id, :period) on duplicate key update period = values(period)
 func (dao *DefaultHistoryTtlDAO) InsertOrUpdateTx(tx *sqlx.Tx, do *dataobject.DefaultHistoryTtlDO) (lastInsertId, rowsAffected int64, err error) {
 	var (
-		query = "insert into default_history_ttl(user_id, period) values (:user_id, :period) on duplicate key update period = values(period)"
+		query string
 		r     sql.Result
 	)
+	query = "insert into default_history_ttl(user_id, period) values (:user_id, :period) on duplicate key update period = values(period)"
 
 	r, err = tx.NamedExec(query, do)
 	if err != nil {
@@ -81,12 +76,12 @@ func (dao *DefaultHistoryTtlDAO) InsertOrUpdateTx(tx *sqlx.Tx, do *dataobject.De
 
 	lastInsertId, err = r.LastInsertId()
 	if err != nil {
-		logx.WithContext(tx.Context()).Errorf("lastInsertId in InsertOrUpdate(%v)_error: %v", do, err)
+		logx.WithContext(tx.Context()).Errorf("lastInsertId in InsertOrUpdate(%v), error: %v", do, err)
 		return
 	}
 	rowsAffected, err = r.RowsAffected()
 	if err != nil {
-		logx.WithContext(tx.Context()).Errorf("rowsAffected in InsertOrUpdate(%v)_error: %v", do, err)
+		logx.WithContext(tx.Context()).Errorf("rowsAffected in InsertOrUpdate(%v), error: %v", do, err)
 	}
 
 	return
@@ -96,9 +91,11 @@ func (dao *DefaultHistoryTtlDAO) InsertOrUpdateTx(tx *sqlx.Tx, do *dataobject.De
 // select id, user_id, period from default_history_ttl where user_id = :user_id
 func (dao *DefaultHistoryTtlDAO) Select(ctx context.Context, userId int64) (rValue *dataobject.DefaultHistoryTtlDO, err error) {
 	var (
-		query = "select id, user_id, period from default_history_ttl where user_id = ?"
+		query string
 		do    = &dataobject.DefaultHistoryTtlDO{}
 	)
+	query = "select id, user_id, period from default_history_ttl where user_id = ?"
+
 	err = dao.db.QueryRowPartial(ctx, do, query, userId)
 
 	if err != nil {
@@ -106,6 +103,7 @@ func (dao *DefaultHistoryTtlDAO) Select(ctx context.Context, userId int64) (rVal
 			logx.WithContext(ctx).Errorf("queryx in Select(_), error: %v", err)
 			return
 		} else {
+			// not found not error, return nil, nil
 			err = nil
 		}
 	} else {

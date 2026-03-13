@@ -1,4 +1,4 @@
-// Copyright 2025 Teamgram Authors
+// Copyright (c) 2026 The Teamgram Authors (https://teamgram.net).
 //  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,23 +14,18 @@
 // limitations under the License.
 //
 // Author: teamgramio (teamgram.io@gmail.com)
-//
 
-package config
+package core
 
 import (
-	kafka "github.com/teamgram/marmota/pkg/mq"
-	"github.com/teamgram/marmota/pkg/stores/sqlx"
-	"github.com/zeromicro/go-zero/core/stores/cache"
-	"github.com/zeromicro/go-zero/zrpc"
+	"github.com/teamgram/proto/mtproto"
 )
 
-type Config struct {
-	zrpc.RpcServerConf
-	Mysql           sqlx.Config
-	Cache           cache.CacheConf
-	MessageSharding int `json:",default=1"`
-	IdgenClient     zrpc.RpcClientConf
-	DialogClient    zrpc.RpcClientConf
-	SyncClient      *kafka.KafkaProducerConf
+// MessagesEditChatParticipantRank
+// messages.editChatParticipantRank#a00f32b0 peer:InputPeer participant:InputPeer rank:string = Updates;
+func (c *ChatsCore) MessagesEditChatParticipantRank(in *mtproto.TLMessagesEditChatParticipantRank) (*mtproto.Updates, error) {
+	// TODO: not impl
+	c.Logger.Errorf("messages.editChatParticipantRank blocked, License key from https://teamgram.net required to unlock enterprise features.")
+
+	return nil, mtproto.ErrEnterpriseIsBlocked
 }
